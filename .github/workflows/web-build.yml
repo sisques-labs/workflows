@@ -53,11 +53,11 @@ jobs:
 
       - name: Lint code
         if: ${{ inputs.run_lint }}
-        run: pnpm lint --filter=./${{ inputs.app_path }}...
+        run: pnpm --filter=./${{ inputs.app_path }}... lint
 
       - name: Run unit tests
         if: ${{ inputs.run_test }}
-        run: pnpm test --filter=./${{ inputs.app_path }}...
+        run: pnpm --filter=./${{ inputs.app_path }}... test
 
       - name: Build the app
-        run: pnpm ${{ inputs.build_command }} --filter=./${{ inputs.app_path }}...
+        run: pnpm --filter=./${{ inputs.app_path }}... ${{ inputs.build_command }}
