@@ -407,6 +407,37 @@ body {
     line-height: 1.6;
 }
 
+/* Inputs List */
+.inputs-list {
+    list-style: none;
+    margin-top: 16px;
+    padding: 0;
+}
+
+.inputs-list li {
+    padding: 8px 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.inputs-list code {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Fira Code', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    color: var(--primary-color);
+}
+
+.detail-section h4 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
 /* Best Practices */
 .best-practices {
     padding: 80px 0;

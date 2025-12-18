@@ -83,10 +83,10 @@
             <h3>Repository Structure</h3>
             <pre><code class="language-bash">.github/
 ├── workflows/          # Reusable workflows
+│   └── web-build.yml   # Web application build workflow
 └── actions/            # Composite actions
     ├── setup/          # Common setup (Node.js, pnpm, checkout)
-    ├── install/        # Install dependencies with pnpm
-    └── prisma-generate/ # Prisma client generation</code></pre>
+    └── install/        # Install dependencies with pnpm</code></pre>
           </div>
         </div>
       </section>
@@ -99,83 +99,6 @@
           </p>
 
           <div class="workflow-grid">
-            <div class="workflow-card">
-              <div class="workflow-icon">🔨</div>
-              <h3>Build</h3>
-              <p>
-                Builds an application or package with optional linting, type
-                checking, tests, and Prisma generation.
-              </p>
-              <a href="#build-details" class="workflow-link">View Details →</a>
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">✨</div>
-              <h3>Code Quality</h3>
-              <p>
-                Runs linting, type checking, and optionally SonarCloud scan.
-              </p>
-              <a href="#quality-details" class="workflow-link"
-                >View Details →</a
-              >
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">🧪</div>
-              <h3>Test</h3>
-              <p>Runs tests with optional coverage and Prisma generation.</p>
-              <a href="#test-details" class="workflow-link">View Details →</a>
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">🚀</div>
-              <h3>Deploy</h3>
-              <p>Deploys an application to a specified environment.</p>
-              <a href="#deploy-details" class="workflow-link">View Details →</a>
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">🔒</div>
-              <h3>Security Scan</h3>
-              <p>Runs security scans using npm audit, Snyk, and Trivy.</p>
-              <a href="#security-details" class="workflow-link"
-                >View Details →</a
-              >
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">📦</div>
-              <h3>Package Release</h3>
-              <p>Releases a package using semantic-release.</p>
-              <a href="#package-release-details" class="workflow-link"
-                >View Details →</a
-              >
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">🐳</div>
-              <h3>App Release</h3>
-              <p>
-                Releases an application and builds/pushes a Docker image to
-                GitHub Container Registry.
-              </p>
-              <a href="#app-release-details" class="workflow-link"
-                >View Details →</a
-              >
-            </div>
-
-            <div class="workflow-card">
-              <div class="workflow-icon">👀</div>
-              <h3>PR Preview</h3>
-              <p>
-                Deploys a preview environment for pull requests (Vercel,
-                Netlify, or Cloudflare).
-              </p>
-              <a href="#pr-preview-details" class="workflow-link"
-                >View Details →</a
-              >
-            </div>
-
             <div class="workflow-card">
               <div class="workflow-icon">🌐</div>
               <h3>Web Build</h3>
@@ -193,31 +116,22 @@
 
       <section id="workflow-details" class="workflow-details">
         <div class="container">
-          <div id="build-details" class="detail-section">
-            <h3>Build</h3>
-            <p>
-              Builds an application or package with optional linting, type
-              checking, tests, and Prisma generation.
-            </p>
-            <pre><code class="language-yaml">jobs:
-  build:
-    uses: sisques-labs/workflows/.github/workflows/build.yml@main
-    with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-      run_lint: true
-      run_test: false
-      run_check_types: false
-      run_prisma_generate: false</code></pre>
-          </div>
-
           <div id="web-build-details" class="detail-section">
             <h3>Web Build</h3>
             <p>
               Builds a Next.js or web application with optional linting and
-              testing.
+              testing. This workflow uses the composite actions for setup and
+              dependency installation.
             </p>
-            <pre><code class="language-yaml">jobs:
+            <pre><code class="language-yaml">name: Web Build
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/**'
+    branches: [main, dev]
+
+jobs:
   build:
     uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
     with:
@@ -227,110 +141,34 @@
       run_lint: true
       run_test: true
       build_command: "build"</code></pre>
-          </div>
-
-          <div id="quality-details" class="detail-section">
-            <h3>Code Quality</h3>
-            <p>Runs linting, type checking, and optionally SonarCloud scan.</p>
-            <pre><code class="language-yaml">jobs:
-  quality:
-    uses: sisques-labs/workflows/.github/workflows/code-quality.yml@main
-    with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-      node_version: "24"
-      run_lint: true
-      check_types: true
-      run_sonarcloud: false</code></pre>
-          </div>
-
-          <div id="test-details" class="detail-section">
-            <h3>Test</h3>
-            <p>Runs tests with optional coverage and Prisma generation.</p>
-            <pre><code class="language-yaml">jobs:
-  test:
-    uses: sisques-labs/workflows/.github/workflows/test.yml@main
-    with:
-      app_path: "apps/api"
-      app_name: "API"
-      node_version: "24"
-      test_command: "test"
-      coverage: true
-      run_prisma_generate: true</code></pre>
-          </div>
-
-          <div id="deploy-details" class="detail-section">
-            <h3>Deploy</h3>
-            <p>Deploys an application to a specified environment.</p>
-            <pre><code class="language-yaml">jobs:
-  deploy:
-    uses: sisques-labs/workflows/.github/workflows/deploy.yml@main
-    with:
-      app_path: "apps/api"
-      app_name: "API"
-      environment: "production"
-      deploy_command: "deploy"
-      node_version: "24"
-      build_before_deploy: true
-    secrets: inherit</code></pre>
-          </div>
-
-          <div id="security-details" class="detail-section">
-            <h3>Security Scan</h3>
-            <p>Runs security scans using npm audit, Snyk, and Trivy.</p>
-            <pre><code class="language-yaml">jobs:
-  security:
-    uses: sisques-labs/workflows/.github/workflows/security-scan.yml@main
-    with:
-      app_path: "."
-      node_version: "24"
-    secrets: inherit</code></pre>
-          </div>
-
-          <div id="package-release-details" class="detail-section">
-            <h3>Package Release</h3>
-            <p>Releases a package using semantic-release.</p>
-            <pre><code class="language-yaml">jobs:
-  release:
-    uses: sisques-labs/workflows/.github/workflows/package-release.yml@main
-    with:
-      package_path: "packages/sdk"
-      package_name: "SDK"
-    secrets: inherit</code></pre>
-          </div>
-
-          <div id="app-release-details" class="detail-section">
-            <h3>App Release with Docker</h3>
-            <p>
-              Releases an application and builds/pushes a Docker image to GitHub
-              Container Registry.
-            </p>
-            <pre><code class="language-yaml">jobs:
-  release:
-    uses: sisques-labs/workflows/.github/workflows/app-release.yml@main
-    with:
-      app_path: "apps/api"
-      app_name: "API"
-      dockerfile_path: "."
-    secrets: inherit</code></pre>
-          </div>
-
-          <div id="pr-preview-details" class="detail-section">
-            <h3>PR Preview</h3>
-            <p>
-              Deploys a preview environment for pull requests (Vercel, Netlify,
-              or Cloudflare).
-            </p>
-            <pre><code class="language-yaml">jobs:
-  preview:
-    uses: sisques-labs/workflows/.github/workflows/pr-preview.yml@main
-    with:
-      app_path: "apps/web"
-      app_name: "Web App"
-      node_version: "24"
-      preview_platform: "vercel"
-      build_command: "build"
-    secrets: inherit</code></pre>
+            <h4>Inputs</h4>
+            <ul class="inputs-list">
+              <li>
+                <code>app_path</code> (required): Path to the web app (e.g.,
+                <code>apps/web</code>)
+              </li>
+              <li>
+                <code>app_name</code> (optional, default:
+                <code>"Web App"</code>): Name of the app for display
+              </li>
+              <li>
+                <code>node_version</code> (optional, default:
+                <code>"24"</code>): Node.js version to use
+              </li>
+              <li>
+                <code>run_lint</code> (optional, default: <code>true</code>):
+                Whether to run lint
+              </li>
+              <li>
+                <code>run_test</code> (optional, default: <code>true</code>):
+                Whether to run tests
+              </li>
+              <li>
+                <code>build_command</code> (optional, default:
+                <code>"build"</code>): Build command to run (e.g.,
+                <code>build</code>, <code>build:prod</code>)
+              </li>
+            </ul>
           </div>
         </div>
       </section>
@@ -354,13 +192,25 @@
   with:
     node_version: "24"
     pnpm_version: "latest"</code></pre>
+              <h4>Inputs</h4>
+              <ul class="inputs-list">
+                <li>
+                  <code>node_version</code> (optional, default:
+                  <code>"24"</code>): Node.js version to use
+                </li>
+                <li>
+                  <code>pnpm_version</code> (optional, default:
+                  <code>"latest"</code>): pnpm version to use
+                </li>
+              </ul>
             </div>
 
             <div class="action-card">
               <h3>Install</h3>
               <p>
                 Install dependencies using pnpm with optional filter and frozen
-                lockfile handling.
+                lockfile handling. Automatically handles dependabot by skipping
+                frozen lockfile when needed.
               </p>
               <pre><code class="language-yaml">- name: Install dependencies
   uses: sisques-labs/workflows/.github/actions/install@main
@@ -368,15 +218,24 @@
     app_path: "apps/web"
     use_filter: "true"
     frozen_lockfile: "true"</code></pre>
-            </div>
-
-            <div class="action-card">
-              <h3>Prisma Generate</h3>
-              <p>Generates Prisma master and tenant clients.</p>
-              <pre><code class="language-yaml">- name: Generate Prisma clients
-  uses: sisques-labs/workflows/.github/actions/prisma-generate@main
-  with:
-    app_path: "apps/api"</code></pre>
+              <h4>Inputs</h4>
+              <ul class="inputs-list">
+                <li>
+                  <code>app_path</code> (optional, default: <code>"."</code>):
+                  Path to the app/package (e.g., <code>apps/web</code>). Use
+                  <code>"."</code> for root
+                </li>
+                <li>
+                  <code>use_filter</code> (optional, default:
+                  <code>"false"</code>): Whether to use filter when installing
+                  (only install dependencies for app_path)
+                </li>
+                <li>
+                  <code>frozen_lockfile</code> (optional, default:
+                  <code>"true"</code>): Whether to use --frozen-lockfile
+                  (automatically skipped for dependabot)
+                </li>
+              </ul>
             </div>
           </div>
         </div>
@@ -386,38 +245,28 @@
         <div class="container">
           <h2>Complete CI Pipeline Example</h2>
           <p class="section-description">
-            Combine multiple workflows for a complete CI/CD pipeline
+            Example of using the Web Build workflow in your project
           </p>
-          <pre><code class="language-yaml">name: CI
+          <pre><code class="language-yaml">name: Web Build
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/web/**'
 
 jobs:
-  quality:
-    uses: sisques-labs/workflows/.github/workflows/code-quality.yml@main
-    with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-
-  test:
-    uses: sisques-labs/workflows/.github/workflows/test.yml@main
-    with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-      coverage: true
-
   build:
-    needs: [quality, test]
-    uses: sisques-labs/workflows/.github/workflows/build.yml@main
+    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
     with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-      run_lint: false  # Already run in quality job
-      run_test: false  # Already run in test job</code></pre>
+      app_path: "apps/web"
+      app_name: "Web App"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"</code></pre>
         </div>
       </section>
 
@@ -432,10 +281,6 @@ jobs:
             <li>
               <strong>Use consistent Node.js versions</strong> across your
               project (default is <code>24</code>)
-            </li>
-            <li>
-              <strong>Enable cache</strong> (<code>use_cache: "true"</code>) for
-              faster builds in most cases
             </li>
             <li>
               <strong>Use install_filter</strong> when you only need
