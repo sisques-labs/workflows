@@ -13,6 +13,122 @@ This repository contains reusable GitHub Actions workflows and composite actions
     └── install/        # Install dependencies with pnpm
 ```
 
+## How to Use in Other Projects
+
+### Prerequisites
+
+1. **Repository Access**: The target project must have access to the `sisques-labs/workflows` repository. If it's a private repository, ensure proper permissions are configured.
+
+2. **Project Structure**: Your project should use:
+   - `pnpm` as package manager
+   - A monorepo structure (optional, but recommended for `app_path` usage)
+
+### Using Reusable Workflows
+
+To use a reusable workflow in another project, create a workflow file in your project's `.github/workflows/` directory and reference the workflow using the `uses` keyword.
+
+**Example: Using the Web Build workflow**
+
+Create `.github/workflows/ci.yml` in your project:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-web:
+    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+    with:
+      app_path: "apps/web"
+      app_name: "My Web App"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"
+    secrets: inherit # Required if the workflow needs secrets
+```
+
+**Key Points:**
+
+- Use `uses: sisques-labs/workflows/.github/workflows/web-build.yml@main` to reference the workflow
+- Replace `@main` with the branch/tag you want to use (e.g., `@v1.0.0` for versioned releases)
+- All inputs are passed via the `with:` section
+- Use `secrets: inherit` to pass secrets from your repository to the reusable workflow
+
+### Using Composite Actions
+
+You can also use the composite actions directly in your own workflows:
+
+**Example: Using Setup and Install actions**
+
+```yaml
+name: Custom Workflow
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  custom-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: "24"
+          pnpm_version: "latest"
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: "apps/web"
+          use_filter: "true"
+          frozen_lockfile: "true"
+
+      - name: Your custom step
+        run: echo "Do something custom here"
+```
+
+### Versioning Strategy
+
+- **`@main`**: Use for latest/development version (may have breaking changes)
+- **`@v1.0.0`**: Use for stable, versioned releases (recommended for production)
+- **`@feature-branch`**: Use for testing new features before merging
+
+**Recommendation**: Pin to a specific version tag for production projects to ensure stability.
+
+### Multiple Apps in Monorepo
+
+If you have multiple apps in a monorepo, you can create separate jobs for each:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-web:
+    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+    with:
+      app_path: "apps/web"
+      app_name: "Web App"
+
+  build-admin:
+    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+    with:
+      app_path: "apps/admin"
+      app_name: "Admin App"
+```
+
 ## Reusable Workflows
 
 ### Web Build
