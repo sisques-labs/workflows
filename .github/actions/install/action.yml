@@ -1,0 +1,37 @@
+name: "Install Dependencies"
+description: "Install dependencies using pnpm with optional filter and frozen lockfile handling"
+
+inputs:
+  app_path:
+    description: 'Path to the app/package (e.g., apps/web). Use "." for root'
+    required: false
+    default: "."
+  use_filter:
+    description: "Whether to use filter when installing (only install dependencies for app_path)"
+    required: false
+    default: "false"
+  frozen_lockfile:
+    description: "Whether to use --frozen-lockfile (skips if dependabot)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        FILTER_ARG=""
+        if [[ "${{ inputs.use_filter }}" == "true" && "${{ inputs.app_path }}" != "." ]]; then
+          FILTER_ARG="--filter=./${{ inputs.app_path }}..."
+        fi
+
+        if [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+          pnpm install --no-frozen-lockfile $FILTER_ARG
+        else
+          if [[ "${{ inputs.frozen_lockfile }}" == "true" ]]; then
+            pnpm install --frozen-lockfile $FILTER_ARG
+          else
+            pnpm install $FILTER_ARG
+          fi
+        fi

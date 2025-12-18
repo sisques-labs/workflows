@@ -1,0 +1,28 @@
+name: "Setup"
+description: "Common setup for Node.js, pnpm, and repository checkout"
+
+inputs:
+  node_version:
+    description: "Node.js version to use"
+    required: false
+    default: "24"
+  pnpm_version:
+    description: "pnpm version to use"
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm_version }}

@@ -1,0 +1,6 @@
+theme: jekyll-theme-minimal
+title: Reusable GitHub Workflows
+description: Centralized CI/CD workflows and composite actions for your projects
+plugins:
+  - jekyll-sitemap
+
