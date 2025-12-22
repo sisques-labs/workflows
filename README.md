@@ -82,7 +82,7 @@ jobs:
         uses: sisques-labs/workflows/.github/actions/setup@main
         with:
           node_version: "24"
-          pnpm_version: "latest"
+          # pnpm_version is optional - will auto-detect from package.json if not specified
 
       - name: Install dependencies
         uses: sisques-labs/workflows/.github/actions/install@main
@@ -219,17 +219,24 @@ Common setup action for repository checkout, Node.js, and pnpm installation.
 **Usage:**
 
 ```yaml
+# Auto-detect pnpm version from package.json (recommended)
 - name: Setup
   uses: sisques-labs/workflows/.github/actions/setup@main
   with:
     node_version: "24"
-    pnpm_version: "latest"
+
+# Or specify pnpm version explicitly
+- name: Setup
+  uses: sisques-labs/workflows/.github/actions/setup@main
+  with:
+    node_version: "24"
+    pnpm_version: "9.0.0"
 ```
 
 **Inputs:**
 
 - `node_version` (optional, default: `"24"`): Node.js version to use
-- `pnpm_version` (optional, default: `"latest"`): pnpm version to use
+- `pnpm_version` (optional, default: `""`): pnpm version to use. If empty, will auto-detect from `package.json` `packageManager` field
 
 ### Install
 

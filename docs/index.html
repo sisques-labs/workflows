@@ -253,11 +253,18 @@ jobs:
                 Common setup action for repository checkout, Node.js, and pnpm
                 installation.
               </p>
-              <pre><code class="language-yaml">- name: Setup
+              <pre><code class="language-yaml"># Auto-detect pnpm version from package.json (recommended)
+- name: Setup
   uses: sisques-labs/workflows/.github/actions/setup@main
   with:
     node_version: "24"
-    pnpm_version: "latest"</code></pre>
+
+# Or specify pnpm version explicitly
+- name: Setup
+  uses: sisques-labs/workflows/.github/actions/setup@main
+  with:
+    node_version: "24"
+    pnpm_version: "9.0.0"</code></pre>
               <h4>Inputs</h4>
               <ul class="inputs-list">
                 <li>
@@ -266,7 +273,7 @@ jobs:
                 </li>
                 <li>
                   <code>pnpm_version</code> (optional, default:
-                  <code>"latest"</code>): pnpm version to use
+                  <code>""</code>): pnpm version to use. If empty, will auto-detect from <code>package.json</code> <code>packageManager</code> field
                 </li>
               </ul>
             </div>

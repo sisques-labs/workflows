@@ -7,9 +7,9 @@ inputs:
     required: false
     default: "24"
   pnpm_version:
-    description: "pnpm version to use"
+    description: "pnpm version to use (leave empty to auto-detect from package.json)"
     required: false
-    default: "latest"
+    default: ""
 
 runs:
   using: "composite"
@@ -23,7 +23,11 @@ runs:
         node-version: ${{ inputs.node_version }}
 
     - name: Install pnpm
+      if: inputs.pnpm_version != ''
       uses: pnpm/action-setup@v4
       with:
         version: ${{ inputs.pnpm_version }}
 
+    - name: Install pnpm (auto-detect)
+      if: inputs.pnpm_version == ''
+      uses: pnpm/action-setup@v4
