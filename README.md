@@ -7,7 +7,8 @@ This repository contains reusable GitHub Actions workflows and composite actions
 ```
 .github/
 ├── workflows/          # Reusable workflows
-│   └── web-build.yml   # Web application build workflow
+│   ├── web-build.yml   # Web application build workflow
+│   └── api-build.yml   # API build workflow
 └── actions/            # Composite actions
     ├── setup/          # Common setup (Node.js, pnpm, checkout)
     └── install/        # Install dependencies with pnpm
@@ -127,6 +128,12 @@ jobs:
     with:
       app_path: "apps/admin"
       app_name: "Admin App"
+
+  build-api:
+    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+    with:
+      app_path: "apps/api"
+      app_name: "API"
 ```
 
 ## Reusable Workflows
@@ -162,6 +169,42 @@ jobs:
 
 - `app_path` (required): Path to the web app (e.g., `apps/web`)
 - `app_name` (optional, default: `"Web App"`): Name of the app for display
+- `node_version` (optional, default: `"24"`): Node.js version to use
+- `run_lint` (optional, default: `true`): Whether to run lint
+- `run_test` (optional, default: `true`): Whether to run tests
+- `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
+
+### API Build
+
+Builds a NestJS or API application with optional linting and testing.
+
+**Usage:**
+
+```yaml
+name: API Build
+
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+    branches: [main, dev]
+
+jobs:
+  build:
+    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+    with:
+      app_path: "apps/api"
+      app_name: "API"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"
+```
+
+**Inputs:**
+
+- `app_path` (required): Path to the API app (e.g., `apps/api`)
+- `app_name` (optional, default: `"API"`): Name of the app for display
 - `node_version` (optional, default: `"24"`): Node.js version to use
 - `run_lint` (optional, default: `true`): Whether to run lint
 - `run_test` (optional, default: `true`): Whether to run tests
@@ -228,11 +271,21 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-web:
     uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
     with:
       app_path: "apps/web"
       app_name: "Web App"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"
+
+  build-api:
+    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+    with:
+      app_path: "apps/api"
+      app_name: "API"
       node_version: "24"
       run_lint: true
       run_test: true

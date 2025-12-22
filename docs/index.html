@@ -83,7 +83,8 @@
             <h3>Repository Structure</h3>
             <pre><code class="language-bash">.github/
 ├── workflows/          # Reusable workflows
-│   └── web-build.yml   # Web application build workflow
+│   ├── web-build.yml   # Web application build workflow
+│   └── api-build.yml   # API build workflow
 └── actions/            # Composite actions
     ├── setup/          # Common setup (Node.js, pnpm, checkout)
     └── install/        # Install dependencies with pnpm</code></pre>
@@ -107,6 +108,17 @@
                 testing.
               </p>
               <a href="#web-build-details" class="workflow-link"
+                >View Details →</a
+              >
+            </div>
+            <div class="workflow-card">
+              <div class="workflow-icon">🚀</div>
+              <h3>API Build</h3>
+              <p>
+                Builds a NestJS or API application with optional linting and
+                testing.
+              </p>
+              <a href="#api-build-details" class="workflow-link"
                 >View Details →</a
               >
             </div>
@@ -150,6 +162,60 @@ jobs:
               <li>
                 <code>app_name</code> (optional, default:
                 <code>"Web App"</code>): Name of the app for display
+              </li>
+              <li>
+                <code>node_version</code> (optional, default:
+                <code>"24"</code>): Node.js version to use
+              </li>
+              <li>
+                <code>run_lint</code> (optional, default: <code>true</code>):
+                Whether to run lint
+              </li>
+              <li>
+                <code>run_test</code> (optional, default: <code>true</code>):
+                Whether to run tests
+              </li>
+              <li>
+                <code>build_command</code> (optional, default:
+                <code>"build"</code>): Build command to run (e.g.,
+                <code>build</code>, <code>build:prod</code>)
+              </li>
+            </ul>
+          </div>
+          <div id="api-build-details" class="detail-section">
+            <h3>API Build</h3>
+            <p>
+              Builds a NestJS or API application with optional linting and
+              testing. This workflow uses the composite actions for setup and
+              dependency installation.
+            </p>
+            <pre><code class="language-yaml">name: API Build
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+    branches: [main, dev]
+
+jobs:
+  build:
+    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+    with:
+      app_path: "apps/api"
+      app_name: "API"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"</code></pre>
+            <h4>Inputs</h4>
+            <ul class="inputs-list">
+              <li>
+                <code>app_path</code> (required): Path to the API app (e.g.,
+                <code>apps/api</code>)
+              </li>
+              <li>
+                <code>app_name</code> (optional, default:
+                <code>"API"</code>): Name of the app for display
               </li>
               <li>
                 <code>node_version</code> (optional, default:
@@ -245,24 +311,32 @@ jobs:
         <div class="container">
           <h2>Complete CI Pipeline Example</h2>
           <p class="section-description">
-            Example of using the Web Build workflow in your project
+            Example of using both Web Build and API Build workflows in your project
           </p>
-          <pre><code class="language-yaml">name: Web Build
+          <pre><code class="language-yaml">name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - 'apps/web/**'
 
 jobs:
-  build:
+  build-web:
     uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
     with:
       app_path: "apps/web"
       app_name: "Web App"
+      node_version: "24"
+      run_lint: true
+      run_test: true
+      build_command: "build"
+
+  build-api:
+    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+    with:
+      app_path: "apps/api"
+      app_name: "API"
       node_version: "24"
       run_lint: true
       run_test: true

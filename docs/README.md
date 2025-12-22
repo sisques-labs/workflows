@@ -26,3 +26,4 @@ You can customize the site by editing:
 - Content and structure in `index.html`
 - Interactive features in `script.js`
 
+

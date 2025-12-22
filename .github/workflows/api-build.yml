@@ -1,0 +1,63 @@
+name: API Build
+
+on:
+  workflow_call:
+    inputs:
+      app_path:
+        description: "Path to the API app (e.g., apps/api)"
+        required: true
+        type: string
+      app_name:
+        description: "Name of the app for display"
+        required: false
+        type: string
+        default: "API"
+      node_version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "24"
+      run_lint:
+        description: "Whether to run lint"
+        required: false
+        type: boolean
+        default: true
+      run_test:
+        description: "Whether to run tests"
+        required: false
+        type: boolean
+        default: true
+      build_command:
+        description: "Build command to run"
+        required: false
+        type: string
+        default: "build"
+
+jobs:
+  build:
+    name: Build ${{ inputs.app_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: "true"
+          frozen_lockfile: "true"
+
+      - name: Lint code
+        if: ${{ inputs.run_lint }}
+        run: pnpm --filter=./${{ inputs.app_path }}... lint
+
+      - name: Run unit tests
+        if: ${{ inputs.run_test }}
+        run: pnpm --filter=./${{ inputs.app_path }}... test
+
+      - name: Build the app
+        run: pnpm --filter=./${{ inputs.app_path }}... ${{ inputs.build_command }}
