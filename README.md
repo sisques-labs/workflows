@@ -8,7 +8,8 @@ This repository contains reusable GitHub Actions workflows and composite actions
 .github/
 ├── workflows/          # Reusable workflows
 │   ├── web-build.yml   # Web application build workflow
-│   └── api-build.yml   # API build workflow
+│   ├── api-build.yml   # API build workflow
+│   └── node-release.yml # Node.js release workflow with semantic-release
 └── actions/            # Composite actions
     ├── setup/          # Common setup (Node.js, pnpm, checkout)
     └── install/        # Install dependencies with pnpm
@@ -210,6 +211,71 @@ jobs:
 - `run_test` (optional, default: `true`): Whether to run tests
 - `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
 
+### Node Release
+
+Automatically releases a Node.js package using semantic-release. Updates the version in `package.json`, creates Git tags, generates GitHub releases, and creates changelogs automatically based on conventional commits.
+
+**Usage:**
+
+```yaml
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/node-release.yml@main
+    secrets: inherit
+    with:
+      app_path: "packages/sdk"
+      build_command: "build"
+      use_filter: true
+```
+
+**Inputs:**
+
+- `app_path` (optional, default: `"."`): Path to the app/package (e.g., `packages/sdk`, `apps/api`). Use `"."` for root
+- `working_directory` (optional): Working directory for semantic-release (defaults to `app_path`)
+- `node_version` (optional, default: `"24"`): Node.js version to use
+- `pnpm_version` (optional, default: `""`): pnpm version to use. If empty, will auto-detect from `package.json`
+- `use_filter` (optional, default: `false`): Whether to use filter when installing dependencies
+- `build_command` (optional): Build command to run before release (e.g., `build`, `build:prod`)
+- `release_command` (optional): Custom release command. Defaults to `pnpm release` if found in package.json, otherwise uses `npx semantic-release`
+
+**Requirements:**
+
+- Your project must have `semantic-release` configured. You can either:
+  - Add a `release` script to your `package.json`: `"release": "semantic-release"`
+  - Or install `semantic-release` as a dependency (the workflow will use `npx semantic-release`)
+- The workflow requires `GITHUB_TOKEN` (automatically provided) and optionally `NPM_TOKEN` if publishing to npm
+- Ensure your commits follow [Conventional Commits](https://www.conventionalcommits.org/) format for automatic versioning
+
+**Example with monorepo:**
+
+```yaml
+name: Release SDK
+
+on:
+  push:
+    paths:
+      - "packages/sdk/**"
+    branches:
+      - main
+
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/node-release.yml@main
+    secrets: inherit
+    with:
+      app_path: "packages/sdk"
+      working_directory: "packages/sdk"
+      build_command: "build"
+      use_filter: true
+```
+
 ## Composite Actions
 
 ### Setup
@@ -296,6 +362,15 @@ jobs:
       node_version: "24"
       run_lint: true
       run_test: true
+      build_command: "build"
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build-web, build-api]
+    uses: sisques-labs/workflows/.github/workflows/node-release.yml@main
+    secrets: inherit
+    with:
+      app_path: "."
       build_command: "build"
 ```
 

@@ -1,0 +1,115 @@
+name: Node Release
+
+on:
+  workflow_call:
+    inputs:
+      app_path:
+        description: "Path to the app/package (e.g., packages/sdk, apps/api). Use '.' for root"
+        required: false
+        type: string
+        default: "."
+      working_directory:
+        description: "Working directory for semantic-release (defaults to app_path)"
+        required: false
+        type: string
+      node_version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "24"
+      pnpm_version:
+        description: "pnpm version to use (leave empty to auto-detect from package.json)"
+        required: false
+        type: string
+        default: ""
+      use_filter:
+        description: "Whether to use filter when installing dependencies"
+        required: false
+        type: boolean
+        default: false
+      build_command:
+        description: "Build command to run before release (optional)"
+        required: false
+        type: string
+      release_command:
+        description: "Custom release command (defaults to 'pnpm release' or 'npx semantic-release')"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+          pnpm_version: ${{ inputs.pnpm_version }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+          frozen_lockfile: "true"
+
+      - name: Build
+        if: inputs.build_command
+        run: |
+          if [[ "${{ inputs.app_path }}" != "." && "${{ inputs.use_filter }}" == "true" ]]; then
+            pnpm --filter=./${{ inputs.app_path }}... ${{ inputs.build_command }}
+          else
+            pnpm ${{ inputs.build_command }}
+          fi
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release
+        working-directory: ${{ inputs.working_directory || inputs.app_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -f "package.json" ]; then
+            if [ -n "${{ inputs.release_command }}" ]; then
+              ${{ inputs.release_command }}
+            elif grep -q '"release"' package.json; then
+              pnpm release
+            elif command -v npx &> /dev/null; then
+              npx semantic-release
+            else
+              echo "semantic-release not found. Please add it to your package.json scripts or install it."
+              exit 1
+            fi
+          else
+            echo "package.json not found in working directory: ${{ inputs.working_directory || inputs.app_path }}"
+            exit 1
+          fi
+
