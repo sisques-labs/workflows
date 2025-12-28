@@ -7,7 +7,7 @@ inputs:
     required: false
     default: "."
   use_filter:
-    description: "Whether to use filter when installing (only install dependencies for app_path)"
+    description: "Whether to use filter for installation"
     required: false
     default: "false"
   frozen_lockfile:

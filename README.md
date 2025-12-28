@@ -174,6 +174,7 @@ jobs:
 - `run_lint` (optional, default: `true`): Whether to run lint
 - `run_test` (optional, default: `true`): Whether to run tests
 - `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
+- `use_filter` (optional, default: `false`): Whether to use filter for installation
 
 ### API Build
 
@@ -210,6 +211,7 @@ jobs:
 - `run_lint` (optional, default: `true`): Whether to run lint
 - `run_test` (optional, default: `true`): Whether to run tests
 - `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
+- `use_filter` (optional, default: `false`): Whether to use filter for installation
 
 ### Node Release
 
@@ -241,7 +243,7 @@ jobs:
 - `working_directory` (optional): Working directory for semantic-release (defaults to `app_path`)
 - `node_version` (optional, default: `"24"`): Node.js version to use
 - `pnpm_version` (optional, default: `""`): pnpm version to use. If empty, will auto-detect from `package.json`
-- `use_filter` (optional, default: `false`): Whether to use filter when installing dependencies
+- `use_filter` (optional, default: `false`): Whether to use filter for installation
 - `build_command` (optional): Build command to run before release (e.g., `build`, `build:prod`)
 - `release_command` (optional): Custom release command. Defaults to `pnpm release` if found in package.json, otherwise uses `npx semantic-release`
 
@@ -322,7 +324,7 @@ Install dependencies using pnpm with optional filter and frozen lockfile handlin
 **Inputs:**
 
 - `app_path` (optional, default: `"."`): Path to the app/package (e.g., `apps/web`). Use `"."` for root
-- `use_filter` (optional, default: `"false"`): Whether to use filter when installing (only install dependencies for app_path)
+- `use_filter` (optional, default: `"false"`): Whether to use filter for installation
 - `frozen_lockfile` (optional, default: `"true"`): Whether to use --frozen-lockfile (automatically skipped for dependabot)
 
 ## Best Practices

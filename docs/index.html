@@ -192,6 +192,10 @@ jobs:
                 <code>"build"</code>): Build command to run (e.g.,
                 <code>build</code>, <code>build:prod</code>)
               </li>
+              <li>
+                <code>use_filter</code> (optional, default: <code>false</code>):
+                Whether to use filter for installation
+              </li>
             </ul>
           </div>
           <div id="api-build-details" class="detail-section">
@@ -245,6 +249,10 @@ jobs:
                 <code>build_command</code> (optional, default:
                 <code>"build"</code>): Build command to run (e.g.,
                 <code>build</code>, <code>build:prod</code>)
+              </li>
+              <li>
+                <code>use_filter</code> (optional, default: <code>false</code>):
+                Whether to use filter for installation
               </li>
             </ul>
           </div>
@@ -401,8 +409,7 @@ jobs:
                 </li>
                 <li>
                   <code>use_filter</code> (optional, default:
-                  <code>"false"</code>): Whether to use filter when installing
-                  (only install dependencies for app_path)
+                  <code>"false"</code>): Whether to use filter for installation
                 </li>
                 <li>
                   <code>frozen_lockfile</code> (optional, default:
