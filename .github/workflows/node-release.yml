@@ -100,13 +100,15 @@ jobs:
           if [ -f "package.json" ]; then
             if [ -n "${{ inputs.release_command }}" ]; then
               ${{ inputs.release_command }}
-            elif grep -q '"release"' package.json; then
-              pnpm release
-            elif command -v npx &> /dev/null; then
-              npx semantic-release
             else
-              echo "semantic-release not found. Please add it to your package.json scripts or install it."
-              exit 1
+              if grep -q '"release"' package.json; then
+                pnpm release
+              elif command -v npx &> /dev/null; then
+                npx semantic-release
+              else
+                echo "semantic-release not found. Please add it to your package.json scripts or install it."
+                exit 1
+              fi
             fi
           else
             echo "package.json not found in working directory: ${{ inputs.working_directory || inputs.app_path }}"
