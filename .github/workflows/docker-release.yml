@@ -89,7 +89,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -101,10 +101,13 @@ jobs:
           cache: pnpm
 
       - name: Configure npm for private packages
-        if: secrets.NODE_AUTH_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
         run: |
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.NODE_AUTH_TOKEN }}" >> ~/.npmrc
-          echo "@sisques-labs:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          if [ -n "${NODE_AUTH_TOKEN}" ]; then
+            echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+            echo "@sisques-labs:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          fi
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -192,7 +195,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
