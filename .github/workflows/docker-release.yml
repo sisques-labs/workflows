@@ -145,6 +145,32 @@ jobs:
             exit 1
           fi
 
+      - name: Detect cliff.toml
+        id: cliff_detect
+        run: |
+          if [ -f cliff.toml ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Generate CHANGELOG.md (full history)
+        if: steps.cliff_detect.outputs.present == 'true'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --verbose --tag ${{ steps.bump.outputs.tag }}
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Generate release body fragment
+        if: steps.cliff_detect.outputs.present == 'true'
+        id: cliff_body
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --verbose --unreleased --strip header --tag ${{ steps.bump.outputs.tag }}
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
       - name: Compute tag list
         id: tags
         env:
@@ -215,11 +241,23 @@ jobs:
           HUSKY: "0"
         run: |
           git add package.json pnpm-lock.yaml
+          if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
           git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
           git tag ${{ steps.bump.outputs.tag }}
           git push origin HEAD --follow-tags
 
+      - name: Create GitHub Release (git-cliff)
+        if: steps.cliff_detect.outputs.present == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: false
+          prerelease: ${{ inputs.release_type != 'stable' }}
+
       - name: Create GitHub Release
+        if: steps.cliff_detect.outputs.present != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.bump.outputs.tag }}
