@@ -211,6 +211,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Commit, tag & push
+        env:
+          HUSKY: "0"
         run: |
           git add package.json pnpm-lock.yaml
           git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
