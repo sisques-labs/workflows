@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       version:
-        description: "Version bump type"
+        description: "Version bump type (patch | minor | major)"
         required: true
         type: string
       release_type:
-        description: "Release type"
+        description: "Release type (stable | alpha | beta | rc)"
         required: false
         type: string
         default: stable
@@ -46,6 +46,16 @@ on:
         required: false
         type: string
         default: "linux/amd64,linux/arm64"
+      push_ghcr:
+        description: "Also publish the image to GitHub Container Registry (GHCR)"
+        required: false
+        type: boolean
+        default: false
+      ghcr_image_name:
+        description: "GHCR image name (e.g. ghcr.io/sisques-labs/aws-local-ui). Required when push_ghcr=true."
+        required: false
+        type: string
+        default: ""
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -57,6 +67,11 @@ on:
 
 permissions:
   contents: write
+  # packages: write is required ONLY when push_ghcr=true; declaring it at the
+  # reusable workflow level is safe — callers that don't enable GHCR simply
+  # never exercise the login step. Callers MUST still declare packages: write
+  # in the consumer workflow for the permission to be granted to GITHUB_TOKEN.
+  packages: write
 
 jobs:
   release:
@@ -64,6 +79,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate GHCR inputs
+        if: inputs.push_ghcr && inputs.ghcr_image_name == ''
+        run: |
+          echo "::error::push_ghcr=true requires a non-empty ghcr_image_name input."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -109,9 +130,49 @@ jobs:
           else
             NEW_VERSION=$(npm version pre${{ inputs.version }} --preid=${{ inputs.release_type }} --no-git-tag-version)
           fi
-          # Strip the leading 'v'
-          echo "version=${NEW_VERSION#v}" >> $GITHUB_OUTPUT
-          echo "tag=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          # Strip the leading 'v' from the npm output for the bare version string.
+          echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against duplicate tag
+        run: |
+          TAG="${{ steps.bump.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Git tag ${TAG} already exists on origin. Refusing to publish a duplicate release."
+            exit 1
+          fi
+
+      - name: Compute tag list
+        id: tags
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+          GHCR_IMAGE_NAME: ${{ inputs.ghcr_image_name }}
+          PUSH_GHCR: ${{ inputs.push_ghcr }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          # Build a newline-separated list of fully-qualified image refs.
+          # Stable releases get :X.Y.Z + :latest on every enabled registry.
+          # Pre-releases get :X.Y.Z-<type>.N + :<type> and never touch :latest.
+          {
+            echo "list<<TAGS_EOF"
+            if [ "${RELEASE_TYPE}" = "stable" ]; then
+              echo "${IMAGE_NAME}:${VERSION}"
+              echo "${IMAGE_NAME}:latest"
+              if [ "${PUSH_GHCR}" = "true" ]; then
+                echo "${GHCR_IMAGE_NAME}:${VERSION}"
+                echo "${GHCR_IMAGE_NAME}:latest"
+              fi
+            else
+              echo "${IMAGE_NAME}:${VERSION}"
+              echo "${IMAGE_NAME}:${RELEASE_TYPE}"
+              if [ "${PUSH_GHCR}" = "true" ]; then
+                echo "${GHCR_IMAGE_NAME}:${VERSION}"
+                echo "${GHCR_IMAGE_NAME}:${RELEASE_TYPE}"
+              fi
+            fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -125,33 +186,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push (stable)
-        if: inputs.release_type == 'stable'
-        uses: docker/build-push-action@v6
+      - name: Log in to GHCR
+        if: inputs.push_ghcr
+        uses: docker/login-action@v3
         with:
-          context: ${{ inputs.context }}
-          file: ${{ inputs.dockerfile }}
-          platforms: ${{ inputs.platforms }}
-          push: true
-          tags: |
-            ${{ inputs.image_name }}:latest
-            ${{ inputs.image_name }}:${{ steps.bump.outputs.version }}
-          secrets: |
-            node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push (pre-release)
-        if: inputs.release_type != 'stable'
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platforms }}
           push: true
-          tags: |
-            ${{ inputs.image_name }}:${{ inputs.release_type }}
-            ${{ inputs.image_name }}:${{ steps.bump.outputs.version }}
+          tags: ${{ steps.tags.outputs.list }}
           secrets: |
             node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
           cache-from: type=gha
