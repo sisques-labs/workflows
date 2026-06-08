@@ -1,0 +1,28 @@
+name: Release train bump
+description: Bump package.json version using release-train strategy
+
+inputs:
+  bump_strategy:
+    description: Bump strategy from release-train-detect
+    required: true
+  version_bump:
+    description: patch | minor | major (used for open-cycle)
+    required: false
+    default: minor
+
+outputs:
+  version:
+    description: New bare semver version
+    value: ${{ steps.bump.outputs.version }}
+  tag:
+    description: New git tag with v prefix
+    value: ${{ steps.bump.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Bump version
+      id: bump
+      shell: bash
+      run: |
+        bash "${{ github.action_path }}/bump.sh" "${{ inputs.bump_strategy }}" "${{ inputs.version_bump }}"

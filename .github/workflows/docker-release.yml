@@ -56,6 +56,21 @@ on:
         required: false
         type: string
         default: ""
+      bump_mode:
+        description: "Version bump mode (legacy | release-train)"
+        required: false
+        type: string
+        default: legacy
+      bump_strategy:
+        description: "Release-train bump strategy (open-cycle | prerelease-alpha | promote-beta | prerelease-beta | graduate)"
+        required: false
+        type: string
+        default: ""
+      sync_develop_after_stable:
+        description: "After a stable release-train graduate, merge main into develop"
+        required: false
+        type: boolean
+        default: false
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -125,17 +140,36 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
-        id: bump
+      - name: Bump version (release train)
+        if: inputs.bump_mode == 'release-train'
+        id: bump_train
+        uses: sisques-labs/workflows/.github/actions/release-train-bump@main
+        with:
+          bump_strategy: ${{ inputs.bump_strategy }}
+          version_bump: ${{ inputs.version }}
+
+      - name: Bump version (legacy)
+        if: inputs.bump_mode != 'release-train'
+        id: bump_legacy
         run: |
           if [ "${{ inputs.release_type }}" = "stable" ]; then
             NEW_VERSION=$(npm version ${{ inputs.version }} --no-git-tag-version)
           else
             NEW_VERSION=$(npm version pre${{ inputs.version }} --preid=${{ inputs.release_type }} --no-git-tag-version)
           fi
-          # Strip the leading 'v' from the npm output for the bare version string.
           echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Export version outputs
+        id: bump
+        run: |
+          if [ "${{ inputs.bump_mode }}" = "release-train" ]; then
+            echo "version=${{ steps.bump_train.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ steps.bump_train.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ steps.bump_legacy.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ steps.bump_legacy.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Guard against duplicate tag
         run: |
@@ -241,10 +275,25 @@ jobs:
           HUSKY: "0"
         run: |
           git add package.json pnpm-lock.yaml
+          if [ -f package-lock.json ]; then git add package-lock.json; fi
           if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
           git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
           git tag ${{ steps.bump.outputs.tag }}
           git push origin HEAD --follow-tags
+
+      - name: Sync stable to develop
+        if: inputs.sync_develop_after_stable
+        env:
+          HUSKY: "0"
+        run: |
+          git fetch origin develop
+          if ! git show-ref --verify --quiet refs/remotes/origin/develop; then
+            echo "develop branch does not exist yet — skipping sync"
+            exit 0
+          fi
+          git checkout develop
+          git merge "${{ steps.bump.outputs.tag }}" -m "chore: sync stable ${{ steps.bump.outputs.tag }} from main"
+          git push origin develop
 
       - name: Create GitHub Release (git-cliff)
         if: steps.cliff_detect.outputs.present == 'true'
