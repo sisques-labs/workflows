@@ -1,0 +1,118 @@
+name: Release Train
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: "Docker Hub image name (e.g. sisqueslabs/gardenia-web)"
+        required: true
+        type: string
+      ghcr_image_name:
+        description: "GHCR image name (e.g. ghcr.io/sisques-labs/gardenia-web)"
+        required: false
+        type: string
+        default: ""
+      push_ghcr:
+        description: "Also publish the image to GitHub Container Registry (GHCR)"
+        required: false
+        type: boolean
+        default: false
+      dockerfile:
+        description: "Path to Dockerfile"
+        required: false
+        type: string
+        default: Dockerfile
+      context:
+        description: "Build context path"
+        required: false
+        type: string
+        default: "."
+      node_version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "20"
+      run_lint:
+        description: "Whether to run lint before building"
+        required: false
+        type: boolean
+        default: true
+      run_test:
+        description: "Whether to run tests before building"
+        required: false
+        type: boolean
+        default: true
+      platforms:
+        description: "Target platforms (e.g. linux/amd64,linux/arm64)"
+        required: false
+        type: string
+        default: "linux/amd64,linux/arm64"
+      sync_develop_after_stable:
+        description: "Merge stable main back into develop after graduating a release"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+      NODE_AUTH_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-train-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect release
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.detect.outputs.should_release }}
+      bump_strategy: ${{ steps.detect.outputs.bump_strategy }}
+      release_type: ${{ steps.detect.outputs.release_type }}
+      version_bump: ${{ steps.detect.outputs.version_bump }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect integrated changes
+        id: detect
+        uses: sisques-labs/workflows/.github/actions/release-train-detect@main
+        with:
+          branch: ${{ github.ref_name }}
+
+  release:
+    name: Build & publish
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    uses: sisques-labs/workflows/.github/workflows/docker-release.yml@main
+    with:
+      image_name: ${{ inputs.image_name }}
+      ghcr_image_name: ${{ inputs.ghcr_image_name }}
+      push_ghcr: ${{ inputs.push_ghcr }}
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      node_version: ${{ inputs.node_version }}
+      run_lint: ${{ inputs.run_lint }}
+      run_test: ${{ inputs.run_test }}
+      platforms: ${{ inputs.platforms }}
+      bump_mode: release-train
+      bump_strategy: ${{ needs.detect.outputs.bump_strategy }}
+      release_type: ${{ needs.detect.outputs.release_type }}
+      version: ${{ needs.detect.outputs.version_bump }}
+      sync_develop_after_stable: ${{ inputs.sync_develop_after_stable && github.ref_name == 'main' }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+    permissions:
+      contents: write
+      packages: write

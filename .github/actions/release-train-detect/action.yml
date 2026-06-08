@@ -1,0 +1,30 @@
+name: Release train detect
+description: Detect whether a release-train publish is needed and which bump strategy to apply
+
+inputs:
+  branch:
+    description: Branch name (develop | staging | main)
+    required: true
+
+outputs:
+  should_release:
+    description: Whether a new release should be published
+    value: ${{ steps.detect.outputs.should_release }}
+  bump_strategy:
+    description: Bump strategy (open-cycle | prerelease-alpha | promote-beta | prerelease-beta | graduate | skip)
+    value: ${{ steps.detect.outputs.bump_strategy }}
+  release_type:
+    description: Release channel (alpha | beta | stable | none)
+    value: ${{ steps.detect.outputs.release_type }}
+  version_bump:
+    description: Semver bump for open-cycle (patch | minor | major)
+    value: ${{ steps.detect.outputs.version_bump }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect integrated changes
+      id: detect
+      shell: bash
+      run: |
+        bash "${{ github.action_path }}/detect.sh" "${{ inputs.branch }}"
