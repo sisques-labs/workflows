@@ -19,6 +19,9 @@ outputs:
   version_bump:
     description: Semver bump for open-cycle (patch | minor | major)
     value: ${{ steps.detect.outputs.version_bump }}
+  current_version:
+    description: Current version derived from git tags (base for bump.sh)
+    value: ${{ steps.detect.outputs.current_version }}
 
 runs:
   using: composite
