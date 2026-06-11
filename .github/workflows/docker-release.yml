@@ -66,6 +66,11 @@ on:
         required: false
         type: string
         default: ""
+      current_version:
+        description: "Current version from git tags (synced to package.json before bump, required when bump_mode=release-train)"
+        required: false
+        type: string
+        default: ""
       sync_develop_after_stable:
         description: "After a stable release-train graduate, merge main into develop"
         required: false
@@ -140,6 +145,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Sync package.json to tag-derived version
+        if: inputs.bump_mode == 'release-train' && inputs.current_version != ''
+        run: npm version ${{ inputs.current_version }} --no-git-tag-version --allow-same-version
+
       - name: Bump version (release train)
         if: inputs.bump_mode == 'release-train'
         id: bump_train
@@ -185,7 +194,7 @@ jobs:
           if [ -f cliff.toml ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Generate CHANGELOG.md (full history)
-        if: steps.cliff_detect.outputs.present == 'true'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
@@ -195,7 +204,7 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Generate release body fragment
-        if: steps.cliff_detect.outputs.present == 'true'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
         id: cliff_body
         uses: orhun/git-cliff-action@v4
         with:
@@ -274,11 +283,13 @@ jobs:
         env:
           HUSKY: "0"
         run: |
-          git add package.json pnpm-lock.yaml
-          if [ -f package-lock.json ]; then git add package-lock.json; fi
-          if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
-          git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
           git tag ${{ steps.bump.outputs.tag }}
+          if [ "${{ github.ref_name }}" != "develop" ]; then
+            git add package.json pnpm-lock.yaml
+            if [ -f package-lock.json ]; then git add package-lock.json; fi
+            if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
+            git diff --staged --quiet || git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
+          fi
           git push origin HEAD --follow-tags
 
       - name: Sync stable to develop

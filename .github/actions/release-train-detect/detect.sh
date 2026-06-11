@@ -2,7 +2,6 @@
 set -euo pipefail
 
 BRANCH="${1:?branch required}"
-CURRENT=$(node -p "require('./package.json').version")
 
 case "$BRANCH" in
   develop) CHANNEL="alpha" ;;
@@ -40,6 +39,21 @@ find_last_channel_tag() {
 find_last_stable_tag() {
   git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true
 }
+
+derive_current() {
+  local channel="$1" tag=""
+  case "$channel" in
+    alpha)  tag=$(git tag -l 'v[0-9]*-alpha.*' --sort=-v:refname | head -1) ;;
+    beta)   tag=$(git tag -l 'v[0-9]*-beta.*'  --sort=-v:refname | head -1)
+            [ -z "$tag" ] && tag=$(git tag -l 'v[0-9]*-alpha.*' --sort=-v:refname | head -1) ;;
+    stable) tag=$(git tag -l 'v[0-9]*-beta.*' --sort=-v:refname | head -1)
+            [ -z "$tag" ] && { echo "::error::No beta tag found on main" >&2; exit 1; } ;;
+  esac
+  [ -z "$tag" ] && tag=$(find_last_stable_tag)
+  [ -z "$tag" ] && tag="v0.0.0"
+  echo "${tag#v}"
+}
+CURRENT=$(derive_current "$CHANNEL")
 
 resolve_version_bump() {
   local since_tag="$1"
@@ -114,6 +128,7 @@ if [ "$SHOULD_RELEASE" = "true" ]; then
   BUMP_STRATEGY=$(resolve_bump_strategy)
   write_github_output "should_release" "true"
   write_github_output "bump_strategy" "$BUMP_STRATEGY"
+  write_github_output "current_version" "$CURRENT"
 
   case "$BRANCH" in
     develop) write_github_output "release_type" "alpha" ;;
