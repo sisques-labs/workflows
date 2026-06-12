@@ -6,13 +6,18 @@ This repository contains reusable GitHub Actions workflows and composite actions
 
 ```
 .github/
-├── workflows/          # Reusable workflows
-│   ├── web-build.yml   # Web application build workflow
-│   ├── api-build.yml   # API build workflow
-│   └── node-release.yml # Node.js release workflow with semantic-release
-└── actions/            # Composite actions
-    ├── setup/          # Common setup (Node.js, pnpm, checkout)
-    └── install/        # Install dependencies with pnpm
+├── workflows/                  # Reusable workflows
+│   ├── web-build.yml           # Web application build workflow
+│   ├── api-build.yml           # API build workflow
+│   ├── node-release.yml        # Node.js release workflow with semantic-release
+│   ├── release-train.yml       # Automatic alpha/beta/stable release train
+│   ├── docker-release.yml      # Version bump + Docker build & publish
+│   └── test.yml                # CI for this repository (detect tests + shellcheck)
+├── actions/                    # Composite actions
+│   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
+│   ├── install/                # Install dependencies with pnpm
+│   └── release-train-detect/   # Compute the exact next version from git tags
+└── tests/                      # Test suites for the scripts in this repo
 ```
 
 ## How to Use in Other Projects
@@ -277,6 +282,88 @@ jobs:
       build_command: "build"
       use_filter: true
 ```
+
+### Release Train
+
+Fully automatic semver pipeline driven by branch merges. Every push to a train
+branch publishes a Docker image, a git tag, and a GitHub Release for the
+corresponding channel:
+
+| Branch    | Channel | Version produced                  | Docker tags                          |
+| --------- | ------- | --------------------------------- | ------------------------------------ |
+| `develop` | alpha   | `X.Y.Z-alpha.N`                   | `:X.Y.Z-alpha.N`, `:alpha`           |
+| `staging` | beta    | `X.Y.Z-beta.N`                    | `:X.Y.Z-beta.N`, `:beta`             |
+| `main`    | stable  | `X.Y.Z`                           | `:X.Y.Z`, `:latest`                  |
+
+**How versions are computed**
+
+Git tags are the single source of truth — `package.json` is overwritten with
+the computed version at release time and is never read to derive one. The
+`release-train-detect` action computes the exact next version in one place:
+
+- `develop` continues the open alpha cycle (`0.16.0-alpha.3` → `0.16.0-alpha.4`)
+  or opens a new one from the latest stable when the previous cycle graduated.
+  The bump for a new cycle follows conventional commits: `feat:` → minor,
+  breaking change (`!` or `BREAKING CHANGE:`) → major, anything else → patch.
+- `staging` promotes the newest alpha cycle to `beta.0`, or iterates the
+  current beta cycle when a fix is merged into staging directly.
+- `main` graduates the leading beta cycle to stable, or cuts a patch release
+  for hotfixes merged straight to main.
+
+A computed version is **always strictly greater than the latest stable
+release**: a stale pre-release cycle whose base already shipped (e.g.
+`0.15.1-beta.N` after `v0.15.1` went stable) is abandoned, never continued.
+Duplicate tags are rejected before anything is published.
+
+**Publish ordering (atomic releases)**
+
+1. Lint, test, and **build** the Docker image without pushing.
+2. Commit the version bump + changelog, tag the release commit, and push both
+   atomically. If this fails, nothing has been published anywhere.
+3. Push the image (instant — reuses the buildx cache) and create the GitHub
+   Release.
+
+This guarantees a git tag can never lag behind a published image, which is
+what previously allowed version reuse.
+
+**Usage (consumer repository):**
+
+```yaml
+name: Release Train
+
+on:
+  push:
+    branches: [develop, staging, main]
+
+permissions:
+  contents: write
+  packages: write
+
+# One group for the whole repo: develop/staging/main releases are serialized
+# so two channels never read/write tags concurrently.
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+    with:
+      image_name: sisqueslabs/my-app
+      ghcr_image_name: ghcr.io/sisques-labs/my-app
+      push_ghcr: true
+      node_version: "22"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    permissions:
+      contents: write
+      packages: write
+```
+
+**Testing:** the version-computation logic is covered by
+`tests/release-train-detect.test.sh`, which runs on every PR to this
+repository (including a regression test for the stale-beta bug).
 
 ## Composite Actions
 

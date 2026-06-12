@@ -64,10 +64,6 @@ permissions:
   contents: write
   packages: write
 
-concurrency:
-  group: release-train-${{ github.repository }}-${{ github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
   detect:
     name: Detect release
@@ -76,8 +72,8 @@ jobs:
       should_release: ${{ steps.detect.outputs.should_release }}
       bump_strategy: ${{ steps.detect.outputs.bump_strategy }}
       release_type: ${{ steps.detect.outputs.release_type }}
-      version_bump: ${{ steps.detect.outputs.version_bump }}
-      current_version: ${{ steps.detect.outputs.current_version }}
+      next_version: ${{ steps.detect.outputs.next_version }}
+      next_tag: ${{ steps.detect.outputs.next_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,6 +85,19 @@ jobs:
         uses: sisques-labs/workflows/.github/actions/release-train-detect@main
         with:
           branch: ${{ github.ref_name }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### Release train — ${{ github.ref_name }}"
+            if [ "${{ steps.detect.outputs.should_release }}" = "true" ]; then
+              echo "- **Next version:** \`${{ steps.detect.outputs.next_tag }}\`"
+              echo "- **Strategy:** ${{ steps.detect.outputs.bump_strategy }}"
+              echo "- **Channel:** ${{ steps.detect.outputs.release_type }}"
+            else
+              echo "- No integrated changes since \`${{ steps.detect.outputs.current_version }}\` — skipping release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Build & publish
@@ -106,10 +115,8 @@ jobs:
       run_test: ${{ inputs.run_test }}
       platforms: ${{ inputs.platforms }}
       bump_mode: release-train
-      bump_strategy: ${{ needs.detect.outputs.bump_strategy }}
       release_type: ${{ needs.detect.outputs.release_type }}
-      version: ${{ needs.detect.outputs.version_bump }}
-      current_version: ${{ needs.detect.outputs.current_version }}
+      next_version: ${{ needs.detect.outputs.next_version }}
       sync_develop_after_stable: ${{ inputs.sync_develop_after_stable && github.ref_name == 'main' }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

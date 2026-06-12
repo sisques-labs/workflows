@@ -8,9 +8,10 @@ on:
         required: true
         type: string
       version:
-        description: "Version bump type (patch | minor | major)"
-        required: true
+        description: "Version bump type for legacy/manual mode (patch | minor | major)"
+        required: false
         type: string
+        default: patch
       release_type:
         description: "Release type (stable | alpha | beta | rc)"
         required: false
@@ -61,13 +62,8 @@ on:
         required: false
         type: string
         default: legacy
-      bump_strategy:
-        description: "Release-train bump strategy (open-cycle | prerelease-alpha | promote-beta | prerelease-beta | graduate)"
-        required: false
-        type: string
-        default: ""
-      current_version:
-        description: "Current version from git tags (synced to package.json before bump, required when bump_mode=release-train)"
+      next_version:
+        description: "Exact version to publish (required when bump_mode=release-train, computed by release-train-detect)"
         required: false
         type: string
         default: ""
@@ -99,11 +95,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate GHCR inputs
-        if: inputs.push_ghcr && inputs.ghcr_image_name == ''
+      - name: Validate inputs
         run: |
-          echo "::error::push_ghcr=true requires a non-empty ghcr_image_name input."
-          exit 1
+          if [ "${{ inputs.push_ghcr }}" = "true" ] && [ -z "${{ inputs.ghcr_image_name }}" ]; then
+            echo "::error::push_ghcr=true requires a non-empty ghcr_image_name input."
+            exit 1
+          fi
+          if [ "${{ inputs.bump_mode }}" = "release-train" ] && [ -z "${{ inputs.next_version }}" ]; then
+            echo "::error::bump_mode=release-train requires a non-empty next_version input."
+            exit 1
+          fi
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -145,18 +146,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Sync package.json to tag-derived version
-        if: inputs.bump_mode == 'release-train' && inputs.current_version != ''
-        run: npm version ${{ inputs.current_version }} --no-git-tag-version --allow-same-version
-
-      - name: Bump version (release train)
+      # Release-train mode: the exact version was computed from git tags by
+      # release-train-detect. Apply it verbatim — package.json is a mirror of
+      # the tag state, never the source of truth.
+      - name: Set version (release train)
         if: inputs.bump_mode == 'release-train'
         id: bump_train
-        uses: sisques-labs/workflows/.github/actions/release-train-bump@main
-        with:
-          bump_strategy: ${{ inputs.bump_strategy }}
-          version_bump: ${{ inputs.version }}
+        run: |
+          NEW_VERSION=$(npm version "${{ inputs.next_version }}" --no-git-tag-version --allow-same-version)
+          echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Legacy mode: manual workflow_dispatch releases bump relative to the
+      # version currently in package.json.
       - name: Bump version (legacy)
         if: inputs.bump_mode != 'release-train'
         id: bump_legacy
@@ -183,8 +185,9 @@ jobs:
       - name: Guard against duplicate tag
         run: |
           TAG="${{ steps.bump.outputs.tag }}"
+          git fetch origin "refs/tags/${TAG}" 2>/dev/null || true
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::Git tag ${TAG} already exists on origin. Refusing to publish a duplicate release."
+            echo "::error::Git tag ${TAG} already exists. Refusing to publish a duplicate release."
             exit 1
           fi
 
@@ -266,7 +269,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and push
+      # Build first WITHOUT pushing: if the image cannot be built, nothing is
+      # published anywhere (no git tag, no registry tag, no GitHub Release).
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: false
+          tags: ${{ steps.tags.outputs.list }}
+          secrets: |
+            node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Publish to git BEFORE the registries: the git tag is the source of
+      # truth for the next version computation, so it must never lag behind
+      # a published image. The atomic push guarantees the release commit and
+      # its tag land together or not at all.
+      - name: Commit, tag & push
+        env:
+          HUSKY: "0"
+        run: |
+          TAG="${{ steps.bump.outputs.tag }}"
+          if [ "${{ github.ref_name }}" != "develop" ]; then
+            git add package.json pnpm-lock.yaml
+            if [ -f package-lock.json ]; then git add package-lock.json; fi
+            if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
+            git diff --staged --quiet || git commit -m "chore(release): ${TAG}"
+          fi
+          git tag "${TAG}"
+          for attempt in 1 2 3; do
+            if git push --atomic origin "HEAD:${{ github.ref_name }}" "refs/tags/${TAG}"; then
+              exit 0
+            fi
+            echo "git push failed (attempt ${attempt}), retrying in $((attempt * 5))s..."
+            sleep $((attempt * 5))
+            git fetch origin "${{ github.ref_name }}"
+            if ! git merge-base --is-ancestor "origin/${{ github.ref_name }}" HEAD; then
+              echo "::error::Branch ${{ github.ref_name }} moved during the release. Aborting; the next push will release these changes."
+              exit 1
+            fi
+          done
+          echo "::error::Failed to push release commit and tag after 3 attempts."
+          exit 1
+
+      # The registry push reuses the buildx cache from the build step, so this
+      # is a near-instant publish of the exact image that was just built.
+      - name: Push image
         uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.context }}
@@ -277,20 +328,6 @@ jobs:
           secrets: |
             node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Commit, tag & push
-        env:
-          HUSKY: "0"
-        run: |
-          git tag ${{ steps.bump.outputs.tag }}
-          if [ "${{ github.ref_name }}" != "develop" ]; then
-            git add package.json pnpm-lock.yaml
-            if [ -f package-lock.json ]; then git add package-lock.json; fi
-            if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
-            git diff --staged --quiet || git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
-          fi
-          git push origin HEAD --follow-tags
 
       - name: Sync stable to develop
         if: inputs.sync_develop_after_stable
@@ -303,7 +340,7 @@ jobs:
             exit 0
           fi
           git checkout develop
-          git merge "${{ steps.bump.outputs.tag }}" -m "chore: sync stable ${{ steps.bump.outputs.tag }} from main"
+          git merge "${{ steps.bump.outputs.tag }}" -m "chore(release): sync stable ${{ steps.bump.outputs.tag }} from main"
           git push origin develop
 
       - name: Create GitHub Release (git-cliff)
