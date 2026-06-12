@@ -1,5 +1,5 @@
 name: Release train detect
-description: Detect whether a release-train publish is needed and which bump strategy to apply
+description: Detect whether a release-train publish is needed and compute the exact next version from git tags
 
 inputs:
   branch:
@@ -11,17 +11,23 @@ outputs:
     description: Whether a new release should be published
     value: ${{ steps.detect.outputs.should_release }}
   bump_strategy:
-    description: Bump strategy (open-cycle | prerelease-alpha | promote-beta | prerelease-beta | graduate | skip)
+    description: Strategy applied (open-cycle | prerelease-alpha | promote-beta | prerelease-beta | open-cycle-beta | graduate | hotfix-stable | skip)
     value: ${{ steps.detect.outputs.bump_strategy }}
   release_type:
     description: Release channel (alpha | beta | stable | none)
     value: ${{ steps.detect.outputs.release_type }}
   version_bump:
-    description: Semver bump for open-cycle (patch | minor | major)
+    description: Semver bump applied when opening a new cycle (patch | minor | major)
     value: ${{ steps.detect.outputs.version_bump }}
   current_version:
-    description: Current version derived from git tags (base for bump.sh)
+    description: Latest version of this channel derived from git tags (informational)
     value: ${{ steps.detect.outputs.current_version }}
+  next_version:
+    description: Exact next version to publish (e.g. 0.15.2-beta.0). Empty when should_release=false
+    value: ${{ steps.detect.outputs.next_version }}
+  next_tag:
+    description: Exact next git tag to publish (e.g. v0.15.2-beta.0). Empty when should_release=false
+    value: ${{ steps.detect.outputs.next_tag }}
 
 runs:
   using: composite
