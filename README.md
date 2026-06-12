@@ -326,6 +326,11 @@ Duplicate tags are rejected before anything is published.
 This guarantees a git tag can never lag behind a published image, which is
 what previously allowed version reuse.
 
+**Release notes:** stable releases accumulate everything shipped since the
+previous stable release into one flat section (the work that flowed through
+alpha/beta), so the notes describe what actually lands in production.
+Pre-release notes only cover what is new since the last tag.
+
 **Usage (consumer repository):**
 
 ```yaml
