@@ -40,10 +40,46 @@ find_last_stable_tag() {
   git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true
 }
 
+# When a stable release graduates ahead of an older pre-release cycle (e.g. v0.15.1
+# stable while v0.15.0-alpha.10 still exists), develop must open a new alpha cycle
+# from the stable tag instead of continuing the stale pre-release chain.
+prefer_stable_over_stale_prerelease() {
+  local prerelease_tag="$1"
+  local stable_tag prerelease_ver stable_ver prerelease_base
+
+  stable_tag=$(find_last_stable_tag)
+
+  if [ -z "$prerelease_tag" ]; then
+    echo "${stable_tag:-v0.0.0}"
+    return
+  fi
+
+  if [ -z "$stable_tag" ]; then
+    echo "$prerelease_tag"
+    return
+  fi
+
+  prerelease_ver="${prerelease_tag#v}"
+  stable_ver="${stable_tag#v}"
+
+  if [[ "$prerelease_ver" =~ ^([0-9]+\.[0-9]+\.[0-9]+)- ]]; then
+    prerelease_base="${BASH_REMATCH[1]}"
+    if [ "$(printf '%s\n' "$prerelease_base" "$stable_ver" | sort -V | tail -1)" = "$stable_ver" ] \
+      && [ "$stable_ver" != "$prerelease_base" ]; then
+      echo "$stable_tag"
+      return
+    fi
+  fi
+
+  echo "$prerelease_tag"
+}
+
 derive_current() {
   local channel="$1" tag=""
   case "$channel" in
-    alpha)  tag=$(git tag -l 'v[0-9]*-alpha.*' --sort=-v:refname | head -1) ;;
+    alpha)
+      tag=$(prefer_stable_over_stale_prerelease "$(git tag -l 'v[0-9]*-alpha.*' --sort=-v:refname | head -1)")
+      ;;
     beta)   tag=$(git tag -l 'v[0-9]*-beta.*'  --sort=-v:refname | head -1)
             [ -z "$tag" ] && tag=$(git tag -l 'v[0-9]*-alpha.*' --sort=-v:refname | head -1) ;;
     stable) tag=$(git tag -l 'v[0-9]*-beta.*' --sort=-v:refname | head -1)
