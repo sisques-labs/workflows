@@ -206,13 +206,35 @@ jobs:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
 
+      # Stable releases accumulate everything shipped since the PREVIOUS
+      # stable release into a single flat section — the work that flowed
+      # through alpha/beta would otherwise be attributed to the pre-release
+      # entries and leave the stable notes nearly empty. Pre-releases keep
+      # covering only what is new since the last tag.
+      - name: Determine release notes range
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
+        id: notes_range
+        run: |
+          if [ "${{ inputs.release_type }}" = "stable" ]; then
+            PREV_STABLE=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+            # The regex is single-quoted because git-cliff-action splices
+            # these args into a bash command line.
+            if [ -n "$PREV_STABLE" ]; then
+              echo "args=--ignore-tags '.*-(alpha|beta|rc).*' ${PREV_STABLE}..HEAD" >> "$GITHUB_OUTPUT"
+            else
+              echo "args=--ignore-tags '.*-(alpha|beta|rc).*'" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "args=--unreleased" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate release body fragment
         if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
         id: cliff_body
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --verbose --unreleased --strip header --tag ${{ steps.bump.outputs.tag }}
+          args: --verbose --strip header --tag ${{ steps.bump.outputs.tag }} ${{ steps.notes_range.outputs.args }}
         env:
           OUTPUT: RELEASE_NOTES.md
           GITHUB_REPO: ${{ github.repository }}
