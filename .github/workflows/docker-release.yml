@@ -196,12 +196,18 @@ jobs:
         run: |
           if [ -f cliff.toml ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
 
+      # Pre-release tags (alpha/beta/rc) are collapsed so the file mirrors the
+      # release notes: all work that flowed through the pre-releases of a
+      # version lands under a single stable section instead of being scattered
+      # across the alpha entries (which leaves the stable entry empty, since the
+      # graduation commits carry no new changes). The regex is single-quoted
+      # because git-cliff-action splices these args into a bash command line.
       - name: Generate CHANGELOG.md (full history)
         if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --verbose --tag ${{ steps.bump.outputs.tag }}
+          args: --verbose --tag ${{ steps.bump.outputs.tag }} --ignore-tags '.*-(alpha|beta|rc).*'
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
