@@ -96,6 +96,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Alias for consumers whose .npmrc references ${NODE_AUTH_TOKEN}
+          # (the convention actions/setup-node uses) instead of ${NPM_TOKEN}.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -f "package.json" ]; then
             if [ -n "${{ inputs.release_command }}" ]; then
