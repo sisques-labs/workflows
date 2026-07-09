@@ -318,18 +318,21 @@ Duplicate tags are rejected before anything is published.
 **Publish ordering (atomic releases)**
 
 1. Lint, test, and **build** the Docker image without pushing.
-2. Commit the version bump + changelog, tag the release commit, and push both
-   atomically. If this fails, nothing has been published anywhere.
+2. Tag the release commit and push. Only `main` also commits the version bump
+   + `CHANGELOG.md` before tagging — `develop` and `staging` tag the existing
+   commit as-is, so pre-release channels never push a bot commit back to the
+   branch. If this fails, nothing has been published anywhere.
 3. Push the image (instant — reuses the buildx cache) and create the GitHub
    Release.
 
 This guarantees a git tag can never lag behind a published image, which is
 what previously allowed version reuse.
 
-**Release notes:** stable releases accumulate everything shipped since the
-previous stable release into one flat section (the work that flowed through
-alpha/beta), so the notes describe what actually lands in production.
-Pre-release notes only cover what is new since the last tag.
+**Release notes:** only `main` generates `CHANGELOG.md`/release notes with
+git-cliff, accumulating everything shipped since the previous stable release
+into one flat section (the work that flowed through alpha/beta), so the notes
+describe what actually lands in production. `develop` and `staging` releases
+use GitHub's auto-generated notes instead.
 
 **Usage (consumer repository):**
 
