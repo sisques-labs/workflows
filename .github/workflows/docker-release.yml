@@ -203,7 +203,7 @@ jobs:
       # graduation commits carry no new changes). The regex is single-quoted
       # because git-cliff-action splices these args into a bash command line.
       - name: Generate CHANGELOG.md (full history)
-        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
@@ -218,7 +218,7 @@ jobs:
       # entries and leave the stable notes nearly empty. Pre-releases keep
       # covering only what is new since the last tag.
       - name: Determine release notes range
-        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
         id: notes_range
         run: |
           if [ "${{ inputs.release_type }}" = "stable" ]; then
@@ -235,7 +235,7 @@ jobs:
           fi
 
       - name: Generate release body fragment
-        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name != 'develop'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
         id: cliff_body
         uses: orhun/git-cliff-action@v4
         with:
@@ -321,7 +321,7 @@ jobs:
           HUSKY: "0"
         run: |
           TAG="${{ steps.bump.outputs.tag }}"
-          if [ "${{ github.ref_name }}" != "develop" ]; then
+          if [ "${{ github.ref_name }}" == "main" ]; then
             git add package.json pnpm-lock.yaml
             if [ -f package-lock.json ]; then git add package-lock.json; fi
             if [ -f CHANGELOG.md ] && [ -f cliff.toml ]; then git add CHANGELOG.md; fi
@@ -372,7 +372,7 @@ jobs:
           git push origin develop
 
       - name: Create GitHub Release (git-cliff)
-        if: steps.cliff_detect.outputs.present == 'true'
+        if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.bump.outputs.tag }}
@@ -382,7 +382,7 @@ jobs:
           prerelease: ${{ inputs.release_type != 'stable' }}
 
       - name: Create GitHub Release
-        if: steps.cliff_detect.outputs.present != 'true'
+        if: steps.cliff_detect.outputs.present != 'true' || github.ref_name != 'main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.bump.outputs.tag }}
