@@ -376,17 +376,22 @@ repository (including a regression test for the stale-beta bug).
 ### Docker Hub description sync
 
 Both `docker-release.yml` and `release-train.yml` accept an optional
-`dockerhub_readme_path` input (default: `""`). When set, it points to a
-README file in the consumer's checkout — typically a Docker Hub-specific
-one such as `docker/README.md`, separate from the repo's own development
-`README.md` — that is pushed as the repository description on Docker Hub
-via [`peter-evans/dockerhub-description`](https://github.com/peter-evans/dockerhub-description).
+`dockerhub_readme_path` input (default: `docker/README.md`). It points to a
+README file in the consumer's checkout — a Docker Hub-specific one, separate
+from the repo's own development `README.md` — that is pushed as the
+repository description on Docker Hub via
+[`peter-evans/dockerhub-description`](https://github.com/peter-evans/dockerhub-description).
+
+Consumers don't need to pass anything to opt in: just add a
+`docker/README.md` file to the repo. Nothing else changes for repos that
+don't have that file yet.
 
 ```yaml
 uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
 with:
   image_name: sisqueslabs/my-app
-  dockerhub_readme_path: docker/README.md
+  # dockerhub_readme_path: docker/README.md is the default — override only
+  # if your Docker Hub README lives somewhere else, or pass "" to disable.
 secrets:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -394,9 +399,9 @@ secrets:
 
 **Behavior:**
 
-- **Opt-in and 100% backwards compatible.** Consumers that don't set
-  `dockerhub_readme_path` (or leave it empty) see no change — the sync step
-  is skipped entirely.
+- **100% backwards compatible.** Consumers without a `docker/README.md` (or
+  whatever custom path they set) see no change — the sync step is skipped.
+  Passing `dockerhub_readme_path: ""` explicitly disables it.
 - **Skips without failing the job** if the input is empty, or if the file
   doesn't exist in the checkout at that path. Not every consumer has this
   file yet, so a missing file is not an error.

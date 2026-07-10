@@ -53,10 +53,10 @@ on:
         type: boolean
         default: true
       dockerhub_readme_path:
-        description: "Path (in the consumer's checkout) to the README used as the Docker Hub repository description, e.g. docker/README.md. Leave empty to skip the sync — not all consumers have this file yet. Forwarded to docker-release.yml, which only syncs on the stable channel (main)."
+        description: "Path (in the consumer's checkout) to the README used as the Docker Hub repository description. Defaults to docker/README.md; the sync is skipped without failing if the file doesn't exist there — not all consumers have this file yet. Forwarded to docker-release.yml, which only syncs on the stable channel (main)."
         required: false
         type: string
-        default: ""
+        default: "docker/README.md"
     secrets:
       DOCKERHUB_USERNAME:
         required: true
