@@ -417,6 +417,13 @@ secrets:
   the Docker Hub login step is unconditional, so by the time this step is
   reached the image has already been pushed — there's no separate
   "did we actually publish" flag to check.
+- **Best-effort — never blocks the release.** The sync step runs with
+  `continue-on-error: true`. If it fails (e.g. `DOCKERHUB_TOKEN` lacking the
+  required scope, or a transient Docker Hub API error), the job logs an
+  `::warning::` and carries on — the image was already published and the
+  git tag/GitHub Release already created by this point, so a broken
+  description sync must not fail an otherwise-successful release. Check the
+  job summary/logs for the warning if the description isn't updating.
 
 **⚠️ Token permissions:** `peter-evans/dockerhub-description` calls the
 Docker Hub API to update the repository description, which requires a

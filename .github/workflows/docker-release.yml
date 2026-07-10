@@ -382,14 +382,23 @@ jobs:
             echo "::warning::dockerhub_readme_path was set to '${{ inputs.dockerhub_readme_path }}' but the file was not found in the checkout — skipping Docker Hub description sync."
           fi
 
+      # Best-effort: a broken/under-scoped token or a Docker Hub API hiccup
+      # must never block an already-published image release.
       - name: Sync Docker Hub description
+        id: dockerhub_sync
         if: inputs.release_type == 'stable' && inputs.dockerhub_readme_path != '' && steps.readme_check.outputs.exists == 'true'
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ inputs.image_name }}
           readme-filepath: ${{ inputs.dockerhub_readme_path }}
+
+      - name: Warn on Docker Hub description sync failure
+        if: steps.dockerhub_sync.outcome == 'failure'
+        run: |
+          echo "::warning::Docker Hub description sync failed (repository ${{ inputs.image_name }}). The release itself was NOT affected. This is usually caused by DOCKERHUB_TOKEN lacking Read/Write/Delete scope — see the workflows repo README."
 
       - name: Sync stable to develop
         if: inputs.sync_develop_after_stable
