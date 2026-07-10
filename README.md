@@ -373,6 +373,64 @@ jobs:
 `tests/release-train-detect.test.sh`, which runs on every PR to this
 repository (including a regression test for the stale-beta bug).
 
+### Docker Hub description sync
+
+Both `docker-release.yml` and `release-train.yml` accept an optional
+`dockerhub_readme_path` input (default: `docker/README.md`). It points to a
+README file in the consumer's checkout — a Docker Hub-specific one, separate
+from the repo's own development `README.md` — that is pushed as the
+repository description on Docker Hub via
+[`peter-evans/dockerhub-description`](https://github.com/peter-evans/dockerhub-description).
+
+Consumers don't need to pass anything to opt in: just add a
+`docker/README.md` file to the repo. Nothing else changes for repos that
+don't have that file yet.
+
+```yaml
+uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+with:
+  image_name: sisqueslabs/my-app
+  # dockerhub_readme_path: docker/README.md is the default — override only
+  # if your Docker Hub README lives somewhere else, or pass "" to disable.
+secrets:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+**Behavior:**
+
+- **100% backwards compatible.** Consumers without a `docker/README.md` (or
+  whatever custom path they set) see no change — the sync step is skipped.
+  Passing `dockerhub_readme_path: ""` explicitly disables it.
+- **Skips without failing the job** if the input is empty, or if the file
+  doesn't exist in the checkout at that path. Not every consumer has this
+  file yet, so a missing file is not an error.
+- **Only runs on the stable channel** — `release_type == 'stable'`. In
+  `docker-release.yml` this is the `release_type` input directly (legacy
+  manual releases default to `stable`). `release-train.yml` doesn't
+  re-derive this: it just forwards `dockerhub_readme_path` to
+  `docker-release.yml`, which already receives the channel computed by
+  `release-train-detect` (`develop` → alpha, `staging` → beta, `main` →
+  stable) as its own `release_type` input. Alpha/beta/rc releases and
+  every push to `develop`/`staging` never touch the Docker Hub description.
+- **Only runs after a real publish.** `image_name` is a required input and
+  the Docker Hub login step is unconditional, so by the time this step is
+  reached the image has already been pushed — there's no separate
+  "did we actually publish" flag to check.
+
+**⚠️ Token permissions:** `peter-evans/dockerhub-description` calls the
+Docker Hub API to update the repository description, which requires a
+password or Personal Access Token with **`Read, Write, Delete`** scope.
+This is a **broader scope than what `docker login`/image push needs**
+(typically `Read & Write`). The sync step reuses the existing
+`DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets — if your `DOCKERHUB_TOKEN`
+was created with only `Read & Write` scope, the sync step will fail with
+`401`/`403` even though image pushes keep working fine. Before enabling
+`dockerhub_readme_path`, regenerate/upgrade that token in Docker Hub
+(Account Settings → Security → Access Tokens) to `Read, Write, Delete`.
+If the repository belongs to a Docker Hub organization, the account also
+needs `Admin` permissions on that repository.
+
 ## Composite Actions
 
 ### Setup
