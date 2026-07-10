@@ -72,6 +72,11 @@ on:
         required: false
         type: boolean
         default: false
+      dockerhub_readme_path:
+        description: "Path (in the consumer's checkout) to the README used as the Docker Hub repository description, e.g. docker/README.md. Leave empty to skip the sync — not all consumers have this file yet."
+        required: false
+        type: string
+        default: ""
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -356,6 +361,35 @@ jobs:
           secrets: |
             node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
           cache-from: type=gha
+
+      # By the time this step runs, "Push image" has already succeeded (a
+      # failed push stops the job before reaching here), so image_name was
+      # published and the Docker Hub login above is known-good — no separate
+      # "did we actually publish" check is needed.
+      #
+      # NOTE: peter-evans/dockerhub-description requires a Docker Hub
+      # password/PAT with Read/Write/Delete scope. A token scoped only for
+      # `docker login` + image push (Read & Write) is NOT sufficient and will
+      # make this step fail with 401/403 — see README for details.
+      - name: Check Docker Hub README exists
+        id: readme_check
+        if: inputs.release_type == 'stable' && inputs.dockerhub_readme_path != ''
+        run: |
+          if [ -f "${{ inputs.dockerhub_readme_path }}" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::dockerhub_readme_path was set to '${{ inputs.dockerhub_readme_path }}' but the file was not found in the checkout — skipping Docker Hub description sync."
+          fi
+
+      - name: Sync Docker Hub description
+        if: inputs.release_type == 'stable' && inputs.dockerhub_readme_path != '' && steps.readme_check.outputs.exists == 'true'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ inputs.image_name }}
+          readme-filepath: ${{ inputs.dockerhub_readme_path }}
 
       - name: Sync stable to develop
         if: inputs.sync_develop_after_stable
