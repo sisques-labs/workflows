@@ -105,7 +105,9 @@ jobs:
 
 This repository also hosts a shared [Renovate](https://docs.renovatebot.com/) preset (`default.json`) so dependency-update policy (schedule, grouping, commit style) is centralized instead of duplicated per project.
 
-**Prerequisite**: the [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the target repository (or the whole org).
+**Prerequisites**:
+- The [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the target repository (or the whole org).
+- The preset targets update PRs at a `dependabot/updates` branch (`baseBranches`) instead of the default branch, so that branch must already exist in the target repository before Renovate runs. Promote it to your default branch on whatever cadence you want.
 
 Add a `renovate.json` at the root of your project:
 
