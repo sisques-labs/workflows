@@ -27,6 +27,17 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "github actions updates"
+    },
+    {
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "docker minor and patch updates"
+    },
+    {
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "docker major updates",
+      "groupSlug": "docker-major"
     }
   ]
 }
