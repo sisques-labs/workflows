@@ -101,6 +101,25 @@ jobs:
         run: echo "Do something custom here"
 ```
 
+### Using the Shared Renovate Config
+
+This repository also hosts a shared [Renovate](https://docs.renovatebot.com/) preset (`default.json`) so dependency-update policy (schedule, grouping, commit style) is centralized instead of duplicated per project.
+
+**Prerequisite**: the [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the target repository (or the whole org).
+
+Add a `renovate.json` at the root of your project:
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>sisques-labs/workflows"]
+}
+```
+
+Project-specific overrides (e.g. a different schedule or extra `packageRules`) can be added alongside the `extends` array in that same file — they take precedence over the shared preset.
+
+**Note**: if the project previously used Dependabot version updates (`.github/dependabot.yml`), remove that file when adopting this preset to avoid duplicate PRs for the same dependencies.
+
 ### Versioning Strategy
 
 - **`@main`**: Use for latest/development version (may have breaking changes)
