@@ -12,6 +12,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── node-release.yml        # Node.js release workflow with semantic-release
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── docker-release.yml      # Version bump + Docker build & publish
+│   ├── codeql.yml              # CodeQL security analysis (init + analyze)
 │   └── test.yml                # CI for this repository (detect tests + shellcheck)
 ├── actions/                    # Composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
@@ -105,7 +106,9 @@ jobs:
 
 This repository also hosts a shared [Renovate](https://docs.renovatebot.com/) preset (`default.json`) so dependency-update policy (schedule, grouping, commit style) is centralized instead of duplicated per project.
 
-**Prerequisite**: the [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the target repository (or the whole org).
+**Prerequisites**:
+- The [Mend Renovate GitHub App](https://github.com/apps/renovate) must be installed on the target repository (or the whole org).
+- The preset targets update PRs at a `dependabot/updates` branch (`baseBranches`) instead of the default branch, so that branch must already exist in the target repository before Renovate runs. Promote it to your default branch on whatever cadence you want.
 
 Add a `renovate.json` at the root of your project:
 
@@ -309,7 +312,7 @@ branch publishes a Docker image, a git tag, and a GitHub Release for the
 corresponding channel:
 
 | Branch    | Channel | Version produced                  | Docker tags                          |
-| --------- | ------- | --------------------------------- | ------------------------------------ |
+| --------- | ------- | ---------------------------------- | ------------------------------------- |
 | `develop` | alpha   | `X.Y.Z-alpha.N`                   | `:X.Y.Z-alpha.N`, `:alpha`           |
 | `staging` | beta    | `X.Y.Z-beta.N`                    | `:X.Y.Z-beta.N`, `:beta`             |
 | `main`    | stable  | `X.Y.Z`                           | `:X.Y.Z`, `:latest`                  |
@@ -456,6 +459,45 @@ was created with only `Read & Write` scope, the sync step will fail with
 (Account Settings → Security → Access Tokens) to `Read, Write, Delete`.
 If the repository belongs to a Docker Hub organization, the account also
 needs `Admin` permissions on that repository.
+
+### CodeQL
+
+Runs GitHub's CodeQL static analysis (`init` + `analyze`) and uploads results
+to the consumer repo's Security → Code scanning tab. Triggers, branches, and
+schedule are owned by the caller workflow — this reusable workflow only runs
+the scan itself.
+
+**Usage (consumer repository):**
+
+```yaml
+name: CodeQL
+
+on:
+  push:
+    branches: [develop, staging, main]
+  pull_request:
+    branches: [develop, staging, main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+
+jobs:
+  analyze:
+    uses: sisques-labs/workflows/.github/workflows/codeql.yml@main
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+```
+
+**Inputs:**
+
+- `language` (optional, default: `"javascript-typescript"`): CodeQL language identifier. A JS/TS project needs no build step — CodeQL extracts directly from source.
+- `queries` (optional, default: `"security-extended"`): Query suite to run (`default`, `security-extended`, or `security-and-quality`)
+
+**Requirements:**
+
+- The calling job must grant `security-events: write` (to upload SARIF), `actions: read`, and `contents: read` — CodeQL code scanning does not work with a token from `secrets: inherit` alone, permissions must be set explicitly on the job.
+- Public repositories get code scanning for free; private repositories need GitHub Advanced Security enabled on the repo/org.
 
 ## Composite Actions
 
