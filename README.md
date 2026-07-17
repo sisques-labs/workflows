@@ -395,6 +395,42 @@ jobs:
 `tests/release-train-detect.test.sh`, which runs on every PR to this
 repository (including a regression test for the stale-beta bug).
 
+### Branch sync after a stable release
+
+After a stable release (a push to `main` that graduates a release), both
+`release-train.yml` and `docker-release.yml` (`bump_mode: release-train`)
+can merge the new tag back into other long-lived branches so they don't
+drift behind `main`. Two independent inputs control this, both default
+`true` on `release-train.yml`:
+
+- `sync_develop_after_stable`: merges the new tag into `develop`.
+- `sync_dependabot_updates_after_stable`: merges the new tag into
+  `dependabot/updates` — the Renovate base branch from the shared preset
+  above. Renovate PRs accumulate there until someone promotes the branch
+  into `main` by hand, so keeping it merged up to date with every stable
+  release avoids that promotion turning into a painful catch-up merge.
+
+Both syncs:
+
+- Only run on `main` (the stable channel) — regardless of the input value,
+  `release-train.yml` gates the call with `github.ref_name == 'main'`, so a
+  `develop`/`staging` push never touches either branch.
+- Skip silently (exit 0) if the target branch doesn't exist in the
+  repository yet.
+- Fail the job on a merge conflict rather than resolving it silently. By
+  that point the release itself (git tag, Docker image, GitHub Release) has
+  already published successfully, so a failure here just means the branch
+  needs a manual conflict resolution and re-sync — nothing that already
+  shipped is affected.
+
+```yaml
+uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+with:
+  image_name: sisqueslabs/my-app
+  sync_develop_after_stable: true # default
+  sync_dependabot_updates_after_stable: true # default
+```
+
 ### Docker Hub description sync
 
 Both `docker-release.yml` and `release-train.yml` accept an optional

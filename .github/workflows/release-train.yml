@@ -52,6 +52,11 @@ on:
         required: false
         type: boolean
         default: true
+      sync_dependabot_updates_after_stable:
+        description: "Merge stable main back into dependabot/updates after graduating a release (skipped if that branch doesn't exist)"
+        required: false
+        type: boolean
+        default: true
       dockerhub_readme_path:
         description: "Path (in the consumer's checkout) to the README used as the Docker Hub repository description. Defaults to docker/README.md; the sync is skipped without failing if the file doesn't exist there — not all consumers have this file yet. Forwarded to docker-release.yml, which only syncs on the stable channel (main)."
         required: false
@@ -123,6 +128,7 @@ jobs:
       release_type: ${{ needs.detect.outputs.release_type }}
       next_version: ${{ needs.detect.outputs.next_version }}
       sync_develop_after_stable: ${{ inputs.sync_develop_after_stable && github.ref_name == 'main' }}
+      sync_dependabot_updates_after_stable: ${{ inputs.sync_dependabot_updates_after_stable && github.ref_name == 'main' }}
       dockerhub_readme_path: ${{ inputs.dockerhub_readme_path }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
