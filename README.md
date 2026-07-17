@@ -13,6 +13,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── docker-release.yml      # Version bump + Docker build & publish
 │   ├── codeql.yml              # CodeQL security analysis (init + analyze)
+│   ├── pr-labeler.yml          # Auto-label PRs by changed files
 │   └── test.yml                # CI for this repository (detect tests + shellcheck)
 ├── actions/                    # Composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
@@ -498,6 +499,79 @@ jobs:
 
 - The calling job must grant `security-events: write` (to upload SARIF), `actions: read`, and `contents: read` — CodeQL code scanning does not work with a token from `secrets: inherit` alone, permissions must be set explicitly on the job.
 - Public repositories get code scanning for free; private repositories need GitHub Advanced Security enabled on the repo/org.
+
+### PR Labeler
+
+Labels pull requests automatically based on which files changed, using
+[`actions/labeler`](https://github.com/actions/labeler). The consumer repo
+owns the path → label mapping (`.github/labeler.yml`); this reusable workflow
+just runs the labeler and makes sure the labels it references exist first
+(created with a fixed name/color/description on first use, so nothing has to
+be set up by hand in the repo's Settings → Labels).
+
+**Usage (consumer repository):**
+
+```yaml
+name: PR Labeler
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  label:
+    uses: sisques-labs/workflows/.github/workflows/pr-labeler.yml@main
+```
+
+Add `.github/labeler.yml` to the consumer repo, e.g.:
+
+```yaml
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.spec.ts"
+          - "**/*.e2e-spec.ts"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/actions/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package.json"
+          - "pnpm-lock.yaml"
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Dockerfile"
+          - "docker/**"
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.config.*"
+          - "tsconfig*.json"
+```
+
+**Inputs:**
+
+- `configuration-path` (optional, default: `".github/labeler.yml"`): path to the labeler config in the consumer repo's checkout.
+- `sync-labels` (optional, default: `true`): remove a label from the PR once it no longer touches matching files, so labels always reflect the current diff.
+
+**Requirements:**
+
+- The calling job needs no explicit `permissions:` block — `pull-requests: write` and `contents: read` are already granted inside the reusable workflow's own job.
+- The label set (`documentation`, `tests`, `ci`, `dependencies`, `docker`, `config`) is fixed by this workflow, not configurable per consumer — it exists to keep names/colors consistent across repos. A consumer's `labeler.yml` can only choose which of these labels apply to which paths, not invent new label names.
 
 ## Composite Actions
 
