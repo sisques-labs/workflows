@@ -83,7 +83,7 @@ on:
         type: string
         default: "docker/README.md"
       scan_image:
-        description: "Scan the image with Trivy before publishing. Always uploads a full-severity SARIF report to Security > Code scanning; only fails the release on a CRITICAL vulnerability that has a known fix (ignore-unfixed: true)."
+        description: "Scan the image with Trivy before publishing and upload a full-severity SARIF report to Security > Code scanning. Report-only — never fails the release. Blocking on CRITICAL vulnerabilities happens earlier, at PR time (see docker-smoke-build.yml), so a CVE published after a clean merge doesn't fail an unrelated release later."
         required: false
         type: boolean
         default: false
@@ -303,9 +303,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Scanned before anything is pushed: a CRITICAL (fixable) finding must
-      # stop the release before the image ever reaches a registry. Multi-arch
-      # images built with push:false aren't docker-loadable, so this builds a
+      # Report-only: this scan never blocks a release. The blocking check
+      # already ran at PR time (docker-smoke-build.yml, before merge) — a CVE
+      # published after that PR merged cleanly shouldn't fail an unrelated
+      # release train run later for code nobody touched. Multi-arch images
+      # built with push:false aren't docker-loadable, so this builds a
       # linux/amd64-only copy with load:true purely to scan locally — it's
       # never pushed. This reuses the buildx cache the real multi-arch build
       # below will also read from, so the extra build is cheap.
@@ -324,36 +326,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Full-severity report for visibility in Security > Code scanning.
-      # Never fails the job — that's the next step's job, scoped to CRITICAL.
-      - name: Scan image for vulnerabilities (report)
+      - name: Scan image for vulnerabilities
         if: inputs.scan_image
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: sisques-labs/workflows/.github/actions/trivy-scan@main
         with:
-          image-ref: ${{ inputs.image_name }}:scan
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: "0"
-
-      - name: Upload vulnerability report to GitHub Security tab
-        if: inputs.scan_image
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
-
-      # The actual gate: only a CRITICAL vulnerability WITH a known fix blocks
-      # the release. ignore-unfixed is intentional — a CRITICAL with no fix
-      # available would otherwise block every future release of this image
-      # with no way to resolve it short of a .trivyignore entry.
-      - name: Fail release on CRITICAL vulnerabilities
-        if: inputs.scan_image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ inputs.image_name }}:scan
-          format: table
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+          image_ref: ${{ inputs.image_name }}:scan
+          block_on_critical: "false"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4

@@ -63,7 +63,7 @@ on:
         type: string
         default: "docker/README.md"
       scan_image:
-        description: "Scan the image with Trivy before publishing (every channel, not just stable). Only fails the release on a CRITICAL vulnerability with a known fix."
+        description: "Scan the image with Trivy before publishing (every channel, not just stable) and upload a SARIF report. Report-only — never fails the release; blocking happens at PR time instead (see docker-smoke-build.yml)."
         required: false
         type: boolean
         default: false
