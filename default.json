@@ -9,36 +9,16 @@
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
   "dependencyDashboard": true,
+  "prConcurrentLimit": 20,
+  "prHourlyLimit": 5,
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 9am on monday"]
   },
   "packageRules": [
     {
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "npm minor and patch updates"
-    },
-    {
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["major"],
-      "groupName": "npm major updates",
-      "groupSlug": "npm-major"
-    },
-    {
-      "matchManagers": ["github-actions"],
-      "groupName": "github actions updates"
-    },
-    {
-      "matchManagers": ["dockerfile", "docker-compose"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "docker minor and patch updates"
-    },
-    {
-      "matchManagers": ["dockerfile", "docker-compose"],
-      "matchUpdateTypes": ["major"],
-      "groupName": "docker major updates",
-      "groupSlug": "docker-major"
+      "matchPackageNames": ["*"],
+      "groupName": null
     }
   ]
 }
