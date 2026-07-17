@@ -497,6 +497,55 @@ was created with only `Read & Write` scope, the sync step will fail with
 If the repository belongs to a Docker Hub organization, the account also
 needs `Admin` permissions on that repository.
 
+### Docker image vulnerability scanning
+
+Both `docker-release.yml` and `release-train.yml` accept an optional
+`scan_image` input (default `false`) that scans the built image with
+[Trivy](https://github.com/aquasecurity/trivy) before it's published.
+
+```yaml
+uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+with:
+  image_name: sisqueslabs/my-app
+  scan_image: true
+permissions:
+  contents: write
+  packages: write
+  security-events: write # required for the SARIF upload
+```
+
+**How it works:**
+
+- Multi-arch images built with `push: false` can't be `docker load`ed, so
+  when `scan_image` is enabled a second, `linux/amd64`-only image is built
+  with `load: true` purely to scan locally — it's never pushed anywhere.
+  It reuses the same buildx cache as the real multi-arch build, so the
+  extra build is cheap.
+- A full-severity SARIF report is always generated and uploaded to the
+  consumer repo's Security → Code scanning tab, regardless of whether
+  anything CRITICAL was found — this step never fails the job.
+- A **separate** scan then fails the job if it finds a **CRITICAL**
+  vulnerability that **has a known fix** (`ignore-unfixed: true`). A
+  CRITICAL with no upstream fix available is reported in the SARIF but
+  does not block the release — otherwise a single unfixable CVE in a base
+  image would block every future release with no way out short of a
+  `.trivyignore` entry.
+- Runs on **every** channel (alpha/beta/stable via `release-train.yml`, or
+  any manual run via `docker-release.yml` directly) — an alpha/beta image
+  still reaches real users testing it, so it isn't scoped to stable-only
+  like the branch syncs above.
+- Scanning happens **before** the version bump, git tag, and any registry
+  push — a CRITICAL finding stops the release before anything is
+  published, not after.
+
+**Requirements:**
+
+- The calling job must grant `security-events: write` explicitly (same
+  rule as CodeQL below) — `secrets: inherit` alone does not cover this.
+- Off by default (`scan_image: false`) so enabling it is an explicit,
+  per-repo opt-in rather than something that can suddenly fail an existing
+  release train on CVEs nobody has triaged yet.
+
 ### CodeQL
 
 Runs GitHub's CodeQL static analysis (`init` + `analyze`) and uploads results
