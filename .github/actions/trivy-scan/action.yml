@@ -1,0 +1,40 @@
+name: "Trivy Vulnerability Scan"
+description: "Scans a local Docker image with Trivy, always uploads a full-severity SARIF report to Security > Code scanning, and optionally fails on a CRITICAL vulnerability that has a known fix"
+
+inputs:
+  image_ref:
+    description: "Local, already-built image ref to scan (e.g. myimage:scan)"
+    required: true
+  block_on_critical:
+    description: "Fail the step if a CRITICAL vulnerability with a known fix is found"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Scan image for vulnerabilities (report)
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image_ref }}
+        format: sarif
+        output: trivy-results.sarif
+        exit-code: "0"
+
+    - name: Upload vulnerability report to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-results.sarif
+
+    # ignore-unfixed is intentional: a CRITICAL with no fix available would
+    # otherwise block every future run with no way to resolve it short of a
+    # .trivyignore entry.
+    - name: Fail on CRITICAL vulnerabilities
+      if: inputs.block_on_critical == 'true'
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image_ref }}
+        format: table
+        severity: CRITICAL
+        ignore-unfixed: true
+        exit-code: "1"

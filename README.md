@@ -11,12 +11,14 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── node-release.yml        # Node.js release workflow with semantic-release
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── docker-release.yml      # Version bump + Docker build & publish
+│   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
 │   ├── codeql.yml              # CodeQL security analysis (init + analyze)
 │   ├── pr-labeler.yml          # Auto-label PRs by changed files
 │   └── test.yml                # CI for this repository (detect tests + shellcheck)
 ├── actions/                    # Composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
 │   ├── install/                # Install dependencies with pnpm
+│   ├── trivy-scan/             # Scan a local image, report always, block optionally
 │   └── release-train-detect/   # Compute the exact next version from git tags
 └── tests/                      # Test suites for the scripts in this repo
 ```
@@ -451,9 +453,57 @@ needs `Admin` permissions on that repository.
 
 ### Docker image vulnerability scanning
 
-Both `docker-release.yml` and `release-train.yml` accept an optional
-`scan_image` input (default `false`) that scans the built image with
-[Trivy](https://github.com/aquasecurity/trivy) before it's published.
+Vulnerability scanning is split across **two** reusable workflows, on
+purpose, so that blocking happens where it's actually useful and never
+surprises an already-merged release:
+
+| Workflow | When | Blocks on CRITICAL (fixable)? |
+| --- | --- | --- |
+| `docker-smoke-build.yml` | On the PR, before merge | **Yes** |
+| `docker-release.yml` / `release-train.yml` | On publish, after merge | No — report only |
+
+Both scan with [Trivy](https://github.com/aquasecurity/trivy) via the shared
+`trivy-scan` composite action (below); they only differ in whether the
+action's `block_on_critical` is set.
+
+**Why split it this way:** blocking at publish time means a CVE that gets
+published *after* a PR already merged cleanly can fail a release train run
+for code nobody touched — "we already merged to `develop`, why did the
+release just fail?" Blocking at PR time instead gives the same protection
+(a known-vulnerable image never reaches `main`) without that surprise: once
+merged, later scans are purely informational (SARIF still uploads to
+Security → Code scanning either way, so nothing is silently missed).
+
+**Docker Smoke Build (the blocking one):**
+
+```yaml
+name: Docker Build
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write # required for the SARIF upload
+
+jobs:
+  docker:
+    uses: sisques-labs/workflows/.github/workflows/docker-smoke-build.yml@main
+    with:
+      image_name: my-app
+      platforms: linux/amd64,linux/arm64
+      scan_image: true
+```
+
+**Inputs:**
+
+- `image_name` (required): local tag used for the smoke build/scan — never pushed anywhere.
+- `dockerfile` (optional, default: `"Dockerfile"`)
+- `context` (optional, default: `"."`)
+- `platforms` (optional, default: `"linux/amd64,linux/arm64"`): platforms the smoke build validates
+- `scan_image` (optional, default: `false`): scan with Trivy and **fail the check** on a CRITICAL vulnerability with a known fix
+
+**Docker Release / Release Train (report-only):**
 
 ```yaml
 uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
@@ -466,37 +516,38 @@ permissions:
   security-events: write # required for the SARIF upload
 ```
 
-**How it works:**
+**How it works (both workflows):**
 
 - Multi-arch images built with `push: false` can't be `docker load`ed, so
   when `scan_image` is enabled a second, `linux/amd64`-only image is built
   with `load: true` purely to scan locally — it's never pushed anywhere.
-  It reuses the same buildx cache as the real multi-arch build, so the
-  extra build is cheap.
+  It reuses the same buildx cache as the real build, so the extra build is
+  cheap.
 - A full-severity SARIF report is always generated and uploaded to the
   consumer repo's Security → Code scanning tab, regardless of whether
   anything CRITICAL was found — this step never fails the job.
-- A **separate** scan then fails the job if it finds a **CRITICAL**
-  vulnerability that **has a known fix** (`ignore-unfixed: true`). A
-  CRITICAL with no upstream fix available is reported in the SARIF but
-  does not block the release — otherwise a single unfixable CVE in a base
-  image would block every future release with no way out short of a
-  `.trivyignore` entry.
-- Runs on **every** channel (alpha/beta/stable via `release-train.yml`, or
-  any manual run via `docker-release.yml` directly) — an alpha/beta image
-  still reaches real users testing it, so it isn't scoped to stable-only
-  like the branch syncs above.
+- `docker-smoke-build.yml` then also fails the check if it finds a
+  **CRITICAL** vulnerability that **has a known fix** (`ignore-unfixed:
+  true`). A CRITICAL with no upstream fix available is reported in the
+  SARIF but does not block — otherwise a single unfixable CVE in a base
+  image would block every future PR with no way out short of a
+  `.trivyignore` entry. `docker-release.yml`/`release-train.yml` never run
+  this blocking step at all.
+- The release-side scan runs on **every** channel (alpha/beta/stable via
+  `release-train.yml`, or any manual run via `docker-release.yml`
+  directly) — an alpha/beta image still reaches real users testing it, so
+  it isn't scoped to stable-only like the branch syncs above.
 - Scanning happens **before** the version bump, git tag, and any registry
-  push — a CRITICAL finding stops the release before anything is
-  published, not after.
+  push — so even though it never blocks, a fresh SARIF is always available
+  for the exact image about to publish.
 
 **Requirements:**
 
 - The calling job must grant `security-events: write` explicitly (same
   rule as CodeQL below) — `secrets: inherit` alone does not cover this.
-- Off by default (`scan_image: false`) so enabling it is an explicit,
-  per-repo opt-in rather than something that can suddenly fail an existing
-  release train on CVEs nobody has triaged yet.
+- Off by default (`scan_image: false`) on both workflows, so enabling it is
+  an explicit, per-repo opt-in rather than something that can suddenly fail
+  an existing pipeline on CVEs nobody has triaged yet.
 
 ### CodeQL
 
@@ -658,6 +709,34 @@ Install dependencies using pnpm with optional filter and frozen lockfile handlin
 - `app_path` (optional, default: `"."`): Path to the app/package (e.g., `apps/web`). Use `"."` for root
 - `use_filter` (optional, default: `"false"`): Whether to use filter for installation
 - `frozen_lockfile` (optional, default: `"true"`): Whether to use --frozen-lockfile (automatically skipped for dependabot)
+
+### Trivy Scan
+
+Scans an already-built, local Docker image with Trivy: always uploads a
+full-severity SARIF report to Security → Code scanning, and optionally fails
+the step on a CRITICAL vulnerability that has a known fix. Shared by
+`docker-smoke-build.yml` (`block_on_critical: "true"`) and
+`docker-release.yml`/`release-train.yml` (`block_on_critical: "false"`) so
+the scan logic lives in exactly one place — see
+["Docker image vulnerability scanning"](#docker-image-vulnerability-scanning)
+above for why the two callers block differently.
+
+**Usage:**
+
+```yaml
+- name: Scan image for vulnerabilities
+  uses: sisques-labs/workflows/.github/actions/trivy-scan@main
+  with:
+    image_ref: my-app:scan
+    block_on_critical: "true"
+```
+
+**Inputs:**
+
+- `image_ref` (required): local, already-built image ref to scan (e.g. `my-app:scan`)
+- `block_on_critical` (optional, default: `"false"`): fail the step if a CRITICAL vulnerability with a known fix is found
+
+**Requirements:** the calling job needs `security-events: write` for the SARIF upload.
 
 ## Best Practices
 
