@@ -72,6 +72,11 @@ on:
         required: false
         type: boolean
         default: false
+      sync_dependabot_updates_after_stable:
+        description: "After a stable release-train graduate, merge main into dependabot/updates (skipped if that branch doesn't exist)"
+        required: false
+        type: boolean
+        default: false
       dockerhub_readme_path:
         description: "Path (in the consumer's checkout) to the README used as the Docker Hub repository description. Defaults to docker/README.md; the sync is skipped without failing if the file doesn't exist there — not all consumers have this file yet."
         required: false
@@ -413,6 +418,28 @@ jobs:
           git checkout develop
           git merge "${{ steps.bump.outputs.tag }}" -m "chore(release): sync stable ${{ steps.bump.outputs.tag }} from main"
           git push origin develop
+
+      # dependabot/updates is the Renovate base branch (see the shared preset
+      # in this repo's default.json) — Renovate PRs accumulate on top of it
+      # until someone promotes it into main by hand. Keeping it merged up to
+      # date with every stable release avoids that promotion turning into a
+      # painful catch-up merge later. A conflict here fails the job on
+      # purpose: the release itself already published successfully by this
+      # point, so failing loud just means someone needs to resolve the
+      # conflict and re-sync by hand, not that anything shipped was broken.
+      - name: Sync stable to dependabot/updates
+        if: inputs.sync_dependabot_updates_after_stable
+        env:
+          HUSKY: "0"
+        run: |
+          git fetch origin dependabot/updates
+          if ! git show-ref --verify --quiet refs/remotes/origin/dependabot/updates; then
+            echo "dependabot/updates branch does not exist yet — skipping sync"
+            exit 0
+          fi
+          git checkout dependabot/updates
+          git merge "${{ steps.bump.outputs.tag }}" -m "chore(release): sync stable ${{ steps.bump.outputs.tag }} from main"
+          git push origin dependabot/updates
 
       - name: Create GitHub Release (git-cliff)
         if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
