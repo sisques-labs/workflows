@@ -388,7 +388,7 @@ jobs:
         id: dockerhub_sync
         if: inputs.release_type == 'stable' && inputs.dockerhub_readme_path != '' && steps.readme_check.outputs.exists == 'true'
         continue-on-error: true
-        uses: peter-evans/dockerhub-description@v4
+        uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
