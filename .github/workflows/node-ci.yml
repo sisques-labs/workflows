@@ -1,0 +1,162 @@
+name: Node CI
+
+on:
+  workflow_call:
+    inputs:
+      app_path:
+        description: 'Path to the app/package (e.g., apps/web). Use "." for root'
+        required: false
+        type: string
+        default: "."
+      node_version:
+        description: "Node.js version to use"
+        required: true
+        type: string
+      use_filter:
+        description: "Whether to use filter for installation"
+        required: false
+        type: boolean
+        default: false
+      run_lint:
+        description: "Whether to run lint"
+        required: false
+        type: boolean
+        default: true
+      lint_command:
+        description: "Lint command to run (without the leading pnpm)"
+        required: false
+        type: string
+        default: "lint"
+      run_test:
+        description: "Whether to run unit tests"
+        required: false
+        type: boolean
+        default: true
+      test_command:
+        description: "Unit test command to run (without the leading pnpm)"
+        required: false
+        type: string
+        default: "test"
+      run_build:
+        description: "Whether to build"
+        required: false
+        type: boolean
+        default: true
+      build_command:
+        description: "Build command to run (without the leading pnpm)"
+        required: false
+        type: string
+        default: "build"
+      extra_check_command:
+        description: "Optional extra pnpm command that runs as its own parallel job (e.g. a codegen-sync check, a type-check, or a service-less test suite). Skipped when empty."
+        required: false
+        type: string
+        default: ""
+      env_vars:
+        description: "Extra environment variables applied to every job, as newline-separated KEY=VALUE pairs (e.g. non-secret values a test suite needs). Empty by default."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  # Deliberately four independent jobs with no `needs:` between them: lint,
+  # unit tests, build, and the optional extra check all only need `install`,
+  # so they run fully in parallel instead of behind one another. A consumer
+  # workflow that also has DB-backed e2e/integration jobs should give those
+  # no `needs: ci` either, unless they actually consume this workflow's
+  # build output — most don't, they run straight from source.
+  lint:
+    if: inputs.run_lint
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load extra env vars
+        if: inputs.env_vars != ''
+        run: echo "${{ inputs.env_vars }}" >> "$GITHUB_ENV"
+
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+          frozen_lockfile: "true"
+
+      - name: Lint
+        run: pnpm ${{ inputs.lint_command }}
+
+  test:
+    if: inputs.run_test
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load extra env vars
+        if: inputs.env_vars != ''
+        run: echo "${{ inputs.env_vars }}" >> "$GITHUB_ENV"
+
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+          frozen_lockfile: "true"
+
+      - name: Test
+        run: pnpm ${{ inputs.test_command }}
+
+  build:
+    if: inputs.run_build
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load extra env vars
+        if: inputs.env_vars != ''
+        run: echo "${{ inputs.env_vars }}" >> "$GITHUB_ENV"
+
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+          frozen_lockfile: "true"
+
+      - name: Build
+        run: pnpm ${{ inputs.build_command }}
+
+  extra_check:
+    if: inputs.extra_check_command != ''
+    name: Extra check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load extra env vars
+        if: inputs.env_vars != ''
+        run: echo "${{ inputs.env_vars }}" >> "$GITHUB_ENV"
+
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+          frozen_lockfile: "true"
+
+      - name: Run
+        run: pnpm ${{ inputs.extra_check_command }}

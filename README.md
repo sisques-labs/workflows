@@ -7,8 +7,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 ```
 .github/
 ├── workflows/                  # Reusable workflows
-│   ├── web-build.yml           # Web application build workflow
-│   ├── api-build.yml           # API build workflow
+│   ├── node-ci.yml              # Lint, test, and build a Node.js app as parallel jobs
 │   ├── node-release.yml        # Node.js release workflow with semantic-release
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── docker-release.yml      # Version bump + Docker build & publish
@@ -36,7 +35,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 
 To use a reusable workflow in another project, create a workflow file in your project's `.github/workflows/` directory and reference the workflow using the `uses` keyword.
 
-**Example: Using the Web Build workflow**
+**Example: Using the Node CI workflow**
 
 Create `.github/workflows/ci.yml` in your project:
 
@@ -44,30 +43,21 @@ Create `.github/workflows/ci.yml` in your project:
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
   pull_request:
-    branches: [main, develop]
 
 jobs:
-  build-web:
-    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+  ci:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
-      app_path: "apps/web"
-      app_name: "My Web App"
       node_version: "24"
-      run_lint: true
-      run_test: true
-      build_command: "build"
-    secrets: inherit # Required if the workflow needs secrets
 ```
 
 **Key Points:**
 
-- Use `uses: sisques-labs/workflows/.github/workflows/web-build.yml@main` to reference the workflow
+- Use `uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main` to reference the workflow
 - Replace `@main` with the branch/tag you want to use (e.g., `@v1.0.0` for versioned releases)
 - All inputs are passed via the `with:` section
-- Use `secrets: inherit` to pass secrets from your repository to the reusable workflow
+- Use `secrets: inherit` only if the workflow you're calling actually needs secrets (`node-ci.yml` doesn't)
 
 ### Using Composite Actions
 
@@ -140,106 +130,68 @@ If you have multiple apps in a monorepo, you can create separate jobs for each:
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  build-web:
-    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+  ci-web:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
       app_path: "apps/web"
-      app_name: "Web App"
+      node_version: "24"
 
-  build-admin:
-    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
-    with:
-      app_path: "apps/admin"
-      app_name: "Admin App"
-
-  build-api:
-    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+  ci-api:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
       app_path: "apps/api"
-      app_name: "API"
+      node_version: "24"
 ```
 
 ## Reusable Workflows
 
-### Web Build
+### Node CI
 
-Builds a Next.js or web application with optional linting and testing.
-
-**Usage:**
-
-```yaml
-name: Web Build
-
-on:
-  pull_request:
-    paths:
-      - "apps/web/**"
-    branches: [main, dev]
-
-jobs:
-  build:
-    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
-    with:
-      app_path: "apps/web"
-      app_name: "Web App"
-      node_version: "24"
-      run_lint: true
-      run_test: true
-      build_command: "build"
-```
-
-**Inputs:**
-
-- `app_path` (required): Path to the web app (e.g., `apps/web`)
-- `app_name` (optional, default: `"Web App"`): Name of the app for display
-- `node_version` (optional, default: `"24"`): Node.js version to use
-- `run_lint` (optional, default: `true`): Whether to run lint
-- `run_test` (optional, default: `true`): Whether to run tests
-- `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
-- `use_filter` (optional, default: `false`): Whether to use filter for installation
-
-### API Build
-
-Builds a NestJS or API application with optional linting and testing.
+Lints, unit-tests, and builds a Node.js app. Unlike a single sequential job,
+`lint`, `test`, `build`, and the optional `extra_check` run as **four
+independent jobs with no `needs:` between them** — they only need `install`,
+so they all start at once instead of queuing behind each other.
 
 **Usage:**
 
 ```yaml
-name: API Build
+name: CI
 
 on:
   pull_request:
-    paths:
-      - "apps/api/**"
-    branches: [main, dev]
 
 jobs:
-  build:
-    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+  ci:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
-      app_path: "apps/api"
-      app_name: "API"
-      node_version: "24"
-      run_lint: true
-      run_test: true
-      build_command: "build"
+      node_version: "22"
+      test_command: "test:coverage" # only if it differs from the default "test"
+      extra_check_command: "gen:topics:check" # optional, runs as its own parallel job
 ```
 
 **Inputs:**
 
-- `app_path` (required): Path to the API app (e.g., `apps/api`)
-- `app_name` (optional, default: `"API"`): Name of the app for display
-- `node_version` (optional, default: `"24"`): Node.js version to use
-- `run_lint` (optional, default: `true`): Whether to run lint
-- `run_test` (optional, default: `true`): Whether to run tests
-- `build_command` (optional, default: `"build"`): Build command to run (e.g., `build`, `build:prod`)
+- `app_path` (optional, default: `"."`): Path to the app/package (e.g., `apps/web`)
+- `node_version` (required): Node.js version to use
 - `use_filter` (optional, default: `false`): Whether to use filter for installation
+- `run_lint` / `lint_command` (optional, default: `true` / `"lint"`)
+- `run_test` / `test_command` (optional, default: `true` / `"test"`)
+- `run_build` / `build_command` (optional, default: `true` / `"build"`)
+- `extra_check_command` (optional, default: `""`): an extra `pnpm <command>` that runs as its own parallel job when non-empty — e.g. a codegen-sync check, a `tsc --noEmit` type check, or a service-less test suite (`test:e2e` for an app with no DB dependency). Free-form, so it's whatever the consumer repo needs; there's exactly one slot, not a list.
+- `env_vars` (optional, default: `""`): extra environment variables applied to every job, as newline-separated `KEY=VALUE` pairs — for non-secret values a test suite needs (e.g. a mocked login). Use repository/environment secrets instead for anything sensitive.
+
+**What this deliberately does NOT cover:** DB-backed `e2e`/`integration` jobs
+(Postgres services, migrations, seed data). Those differ too much between
+consumers (DB engine/version, env var names, extra setup steps) to fit a
+generic reusable workflow without turning it into a pile of pass-through
+inputs. Define those as ordinary jobs alongside the `ci:` job in the
+consumer's own `ci.yml` — with **no `needs: ci`** unless they genuinely
+consume `node-ci.yml`'s build output (most e2e/integration suites run
+straight from source and only need `install`, so gating them behind lint/
+test/build just adds wall-clock time for no reason).
 
 ### Node Release
 
@@ -726,29 +678,21 @@ on:
     branches: [main]
 
 jobs:
-  build-web:
-    uses: sisques-labs/workflows/.github/workflows/web-build.yml@main
+  ci-web:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
       app_path: "apps/web"
-      app_name: "Web App"
       node_version: "24"
-      run_lint: true
-      run_test: true
-      build_command: "build"
 
-  build-api:
-    uses: sisques-labs/workflows/.github/workflows/api-build.yml@main
+  ci-api:
+    uses: sisques-labs/workflows/.github/workflows/node-ci.yml@main
     with:
       app_path: "apps/api"
-      app_name: "API"
       node_version: "24"
-      run_lint: true
-      run_test: true
-      build_command: "build"
 
   release:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [build-web, build-api]
+    needs: [ci-web, ci-api]
     uses: sisques-labs/workflows/.github/workflows/node-release.yml@main
     secrets: inherit
     with:
