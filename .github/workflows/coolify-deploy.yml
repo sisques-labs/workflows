@@ -1,0 +1,54 @@
+name: Coolify Deploy
+
+on:
+  workflow_call:
+    inputs:
+      force:
+        description: "Force Coolify to redeploy even if it thinks nothing changed (maps to the API's force=true)"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      COOLIFY_BASE_URL:
+        description: "Base URL of the Coolify instance (e.g. https://coolify.example.com), no trailing slash required"
+        required: true
+      COOLIFY_TOKEN:
+        description: "Coolify API token with permission to deploy the target resource"
+        required: true
+      COOLIFY_UUID:
+        description: "UUID of the Coolify resource (application) to deploy"
+        required: true
+
+jobs:
+  deploy:
+    name: Trigger deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Coolify deploy API
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_UUID: ${{ secrets.COOLIFY_UUID }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${COOLIFY_BASE_URL}" ] || [ -z "${COOLIFY_TOKEN}" ] || [ -z "${COOLIFY_UUID}" ]; then
+            echo "::notice::Coolify secrets not configured for this call (COOLIFY_BASE_URL/COOLIFY_TOKEN/COOLIFY_UUID) — skipping deploy. This is expected if this environment hasn't been set up in Coolify yet."
+            exit 0
+          fi
+
+          base="${COOLIFY_BASE_URL%/}"
+          status=$(curl -sS -o /tmp/coolify-response.json -w "%{http_code}" \
+            --get "${base}/api/v1/deploy" \
+            --data-urlencode "uuid=${COOLIFY_UUID}" \
+            --data-urlencode "force=${FORCE}" \
+            -H "Authorization: Bearer ${COOLIFY_TOKEN}")
+
+          echo "HTTP status: ${status}"
+          cat /tmp/coolify-response.json
+
+          if [ "${status}" -lt 200 ] || [ "${status}" -ge 300 ]; then
+            echo "::error::Coolify deploy request failed with HTTP ${status}"
+            exit 1
+          fi

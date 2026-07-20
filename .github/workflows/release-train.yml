@@ -74,6 +74,16 @@ on:
         required: true
       NODE_AUTH_TOKEN:
         required: false
+    outputs:
+      should_release:
+        description: "Whether this run actually published a release (\"true\"/\"false\"). A push with no integrated changes since the last tag skips the release job internally but the workflow_call itself still reports success — check this output before gating anything (e.g. a deploy job) on \"a release happened\"."
+        value: ${{ jobs.detect.outputs.should_release }}
+      release_type:
+        description: "Channel released: alpha | beta | stable. Empty when should_release is \"false\"."
+        value: ${{ jobs.detect.outputs.release_type }}
+      next_tag:
+        description: "Git tag published (e.g. v1.2.3-beta.1). Empty when should_release is \"false\"."
+        value: ${{ jobs.detect.outputs.next_tag }}
 
 permissions:
   contents: write
