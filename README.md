@@ -14,6 +14,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
 │   ├── codeql.yml              # CodeQL security analysis (init + analyze)
 │   ├── pr-labeler.yml          # Auto-label PRs by changed files
+│   ├── coolify-deploy.yml      # Trigger a Coolify deploy via its API
 │   └── test.yml                # CI for this repository (detect tests + shellcheck)
 ├── actions/                    # Composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
@@ -305,6 +306,27 @@ Duplicate tags are rejected before anything is published.
 This guarantees a git tag can never lag behind a published image, which is
 what previously allowed version reuse.
 
+**Outputs:** `should_release` (`"true"`/`"false"`), `release_type`
+(`alpha`/`beta`/`stable`, empty when nothing released), `next_tag` (empty when
+nothing released). A push with no integrated changes since the last tag still
+completes the `uses:` call successfully — the internal `release` job is
+skipped, not failed — so a caller chaining a job after this one (e.g. a
+Coolify deploy) must check `should_release` explicitly rather than relying on
+`needs.<job>.result`:
+
+```yaml
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+    # ...
+
+  deploy:
+    needs: release
+    if: needs.release.outputs.should_release == 'true'
+    uses: sisques-labs/workflows/.github/workflows/coolify-deploy.yml@main
+    # ...
+```
+
 **Release notes:** only `main` generates `CHANGELOG.md`/release notes with
 git-cliff, accumulating everything shipped since the previous stable release
 into one flat section (the work that flowed through alpha/beta), so the notes
@@ -450,6 +472,96 @@ was created with only `Read & Write` scope, the sync step will fail with
 (Account Settings → Security → Access Tokens) to `Read, Write, Delete`.
 If the repository belongs to a Docker Hub organization, the account also
 needs `Admin` permissions on that repository.
+
+### Coolify Deploy
+
+Triggers a deploy on a [Coolify](https://coolify.io) instance by calling its
+deploy API for a specific resource. This is a thin, single-purpose workflow —
+it doesn't know about release channels, branches, or environments; the caller
+decides when to run it and which resource UUID to target.
+
+**Usage (consumer repository):** chain it after a release job, gated on that
+job actually having published something (see `should_release` under
+[Release Train](#release-train) above). Each environment (dev/staging/prod)
+maps to a different Coolify resource UUID, selected by the branch that
+triggered the release:
+
+```yaml
+name: Release Train
+
+on:
+  push:
+    branches: [develop, staging, main]
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/release-train.yml@main
+    with:
+      image_name: sisqueslabs/my-app
+      # ...
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    permissions:
+      contents: write
+      packages: write
+      security-events: write
+
+  deploy:
+    name: Deploy to Coolify
+    needs: release
+    if: needs.release.outputs.should_release == 'true'
+    uses: sisques-labs/workflows/.github/workflows/coolify-deploy.yml@main
+    secrets:
+      COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      COOLIFY_UUID: >-
+        ${{
+          github.ref_name == 'main' && secrets.COOLIFY_UUID_PROD ||
+          github.ref_name == 'staging' && secrets.COOLIFY_UUID_STAGING ||
+          secrets.COOLIFY_UUID_DEV
+        }}
+```
+
+**Inputs:**
+
+- `force` (optional, default: `false`): forces Coolify to redeploy even if it
+  thinks nothing changed (the API's `force` param) — useful for a manual
+  `workflow_dispatch` retry, not normally needed for a release-triggered
+  deploy since a new image tag is itself a change.
+
+**Secrets (all required):**
+
+- `COOLIFY_BASE_URL`: base URL of the Coolify instance (e.g.
+  `https://coolify.example.com`).
+- `COOLIFY_TOKEN`: a Coolify API token with permission to deploy the target
+  resource. Generate it in Coolify under your team/account's API tokens.
+- `COOLIFY_UUID`: UUID of the Coolify resource (application) to deploy. Found
+  on the resource's page in Coolify, or in its own webhook/API settings.
+
+**Naming convention for consumer repo secrets:** one `COOLIFY_TOKEN` and one
+`COOLIFY_BASE_URL` per repo, plus one UUID secret per environment —
+`COOLIFY_UUID_DEV`, `COOLIFY_UUID_STAGING`, `COOLIFY_UUID_PROD` — selected at
+call time by `github.ref_name` as shown above. Treat the UUID as a secret
+even though it isn't a credential by itself: combined with the base URL and
+token it identifies exactly which resource in your infrastructure gets
+redeployed.
+
+**How it works:** a single `GET {COOLIFY_BASE_URL}/api/v1/deploy` request
+with `uuid` and `force` as query params and `Authorization: Bearer
+{COOLIFY_TOKEN}`. The job fails if Coolify returns a non-2xx status. This is
+Coolify's documented deploy-by-API mechanism — verify the exact path against
+your Coolify version's API docs before relying on this in production, since
+self-hosted instances can lag behind the latest API.
 
 ### Docker image vulnerability scanning
 
