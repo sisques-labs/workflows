@@ -32,6 +32,12 @@ jobs:
           FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
+
+          if [ -z "${COOLIFY_BASE_URL}" ] || [ -z "${COOLIFY_TOKEN}" ] || [ -z "${COOLIFY_UUID}" ]; then
+            echo "::notice::Coolify secrets not configured for this call (COOLIFY_BASE_URL/COOLIFY_TOKEN/COOLIFY_UUID) — skipping deploy. This is expected if this environment hasn't been set up in Coolify yet."
+            exit 0
+          fi
+
           base="${COOLIFY_BASE_URL%/}"
           status=$(curl -sS -o /tmp/coolify-response.json -w "%{http_code}" \
             --get "${base}/api/v1/deploy" \

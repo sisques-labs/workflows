@@ -563,6 +563,21 @@ Coolify's documented deploy-by-API mechanism — verify the exact path against
 your Coolify version's API docs before relying on this in production, since
 self-hosted instances can lag behind the latest API.
 
+**Environments you haven't set up yet are a silent no-op, not a failure.**
+`required: true` on a `workflow_call` secret only means the caller's
+`secrets:` block must reference the key — it does **not** mean the resolved
+value is non-empty. In the branch-based UUID selector shown above, a branch
+whose UUID secret was never created (e.g. you only have prod today, so
+`COOLIFY_UUID_STAGING`/`COOLIFY_UUID_DEV` don't exist) resolves to an empty
+string, not an error. This workflow checks for that: if
+`COOLIFY_BASE_URL`/`COOLIFY_TOKEN`/`COOLIFY_UUID` is empty, it logs a
+`::notice::` and exits `0` instead of calling Coolify with a blank UUID (which
+would otherwise fail the job with a confusing 404/422 on every push to that
+branch). This means the `deploy` job pattern above is safe to add for all
+three environments up front, even if only prod's secrets exist right now —
+`develop`/`staging` pushes just show a green, skipped-looking run until you
+add their UUID secrets later.
+
 ### Docker image vulnerability scanning
 
 Vulnerability scanning is split across **two** reusable workflows, on
