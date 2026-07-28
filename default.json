@@ -11,14 +11,25 @@
   "dependencyDashboard": true,
   "prConcurrentLimit": 20,
   "prHourlyLimit": 5,
+  "automergeType": "pr",
+  "platformAutomerge": true,
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 9am on monday"]
+    "schedule": ["before 9am on monday"],
+    "automerge": true
   },
   "packageRules": [
     {
       "matchPackageNames": ["*"],
       "groupName": null
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
     }
   ]
 }

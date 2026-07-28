@@ -117,6 +117,8 @@ Project-specific overrides (e.g. a different schedule or extra `packageRules`) c
 
 **Note**: if the project previously used Dependabot version updates (`.github/dependabot.yml`), remove that file when adopting this preset to avoid duplicate PRs for the same dependencies.
 
+**Automerge**: minor, patch, pin, digest, and lockfile-maintenance PRs are automerged once all required GitHub Actions checks on the PR pass (`automergeType: "pr"`, `platformAutomerge: true`). Major updates are never automerged and always wait for manual review. For the cleanest behavior, enable **Settings → General → Allow auto-merge** on each target repository — if it's off, Renovate falls back to merging the PR itself once checks are green, but the native GitHub auto-merge queue is preferred.
+
 ### Versioning Strategy
 
 - **`@main`**: Use for latest/development version (may have breaking changes)
