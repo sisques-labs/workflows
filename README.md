@@ -117,7 +117,9 @@ Project-specific overrides (e.g. a different schedule or extra `packageRules`) c
 
 **Note**: if the project previously used Dependabot version updates (`.github/dependabot.yml`), remove that file when adopting this preset to avoid duplicate PRs for the same dependencies.
 
-**Automerge**: minor, patch, pin, digest, and lockfile-maintenance PRs are automerged once all required GitHub Actions checks on the PR pass (`automergeType: "pr"`, `platformAutomerge: true`). Major updates are never automerged and always wait for manual review. For the cleanest behavior, enable **Settings → General → Allow auto-merge** on each target repository — if it's off, Renovate falls back to merging the PR itself once checks are green, but the native GitHub auto-merge queue is preferred.
+**Automerge**: minor, patch, pin, digest, and lockfile-maintenance PRs are automerged once all GitHub Actions checks on the PR pass (`automergeType: "pr"`, `platformAutomerge: false`). Major updates are never automerged and always wait for manual review.
+
+`platformAutomerge` is deliberately `false`: it makes Renovate merge the PR itself via the API as soon as it sees all checks green, instead of relying on GitHub's native auto-merge queue. That avoids a hard prerequisite — GitHub's native auto-merge only works when **Settings → General → Allow auto-merge** is enabled on the target repository, and this has been inconsistent across our repos in practice (some had it off, silently leaving green Renovate PRs unmerged). If you'd rather use the native queue for its better branch-protection integration, enable that setting on the repo and flip `platformAutomerge` back to `true`.
 
 ### Versioning Strategy
 
