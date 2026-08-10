@@ -61,7 +61,8 @@ jobs:
                 exit 1
                 ;;
             esac
-            include=$(echo "$include" | jq -c --arg platform "$p" --arg runner "$runner" '. + [{"platform": $platform, "runner": $runner}]')
+            scope="${p//\//-}"
+            include=$(echo "$include" | jq -c --arg platform "$p" --arg runner "$runner" --arg scope "$scope" '. + [{"platform": $platform, "runner": $runner, "scope": $scope}]')
           done
           echo "include=$include" >> "$GITHUB_OUTPUT"
 
@@ -92,8 +93,8 @@ jobs:
           push: false
           load: ${{ inputs.scan_image && matrix.platform == 'linux/amd64' }}
           tags: ${{ inputs.image_name }}:smoke
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.scope }}
 
       - name: Scan image for vulnerabilities
         if: inputs.scan_image && matrix.platform == 'linux/amd64'
