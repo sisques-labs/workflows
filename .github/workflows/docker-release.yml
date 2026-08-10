@@ -127,7 +127,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           token: ${{ github.token }}
@@ -136,7 +136,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.0.0
         with:
           node-version: ${{ inputs.node_version }}
           cache: pnpm
@@ -334,14 +334,14 @@ jobs:
           block_on_critical: "false"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         if: inputs.push_ghcr
-        uses: docker/login-action@v4
+        uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -350,7 +350,7 @@ jobs:
       # Build first WITHOUT pushing: if the image cannot be built, nothing is
       # published anywhere (no git tag, no registry tag, no GitHub Release).
       - name: Build image (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
@@ -396,7 +396,7 @@ jobs:
       # The registry push reuses the buildx cache from the build step, so this
       # is a near-instant publish of the exact image that was just built.
       - name: Push image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
