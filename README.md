@@ -797,6 +797,11 @@ config:
 ### Setup
 
 Common setup action for repository checkout, Node.js, and pnpm installation.
+Caches the pnpm store (keyed on the lockfile) via `actions/setup-node`'s
+built-in `cache: pnpm` support, so repeat runs reuse packages already in the
+store instead of re-downloading the whole dependency tree every time. This
+requires pnpm to be installed *before* Node.js — the composite action's step
+order does this internally, no action needed by callers.
 
 **Usage:**
 
