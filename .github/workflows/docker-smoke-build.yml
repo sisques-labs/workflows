@@ -18,12 +18,12 @@ on:
         type: string
         default: "."
       platforms:
-        description: "Comma-separated platforms to smoke-build (e.g. linux/amd64,linux/arm64). Each platform builds natively on its own runner (ubuntu-latest for amd64, ubuntu-24.04-arm for arm64) — no QEMU emulation. Requires arm64 hosted runners to be available to the caller for the linux/arm64 leg."
+        description: "Target platforms to smoke-build (e.g. linux/amd64,linux/arm64)"
         required: false
         type: string
         default: "linux/amd64,linux/arm64"
       scan_image:
-        description: "Scan the image with Trivy and fail this check on a CRITICAL vulnerability that has a known fix. This is the pipeline's ONLY blocking scan — the release-train/docker-release scan is report-only, so a CVE published after this PR merges never fails an unrelated release later. Runs once, on the linux/amd64 leg."
+        description: "Scan the image with Trivy and fail this check on a CRITICAL vulnerability that has a known fix. This is the pipeline's ONLY blocking scan — the release-train/docker-release scan is report-only, so a CVE published after this PR merges never fails an unrelated release later."
         required: false
         type: boolean
         default: false
@@ -36,69 +36,51 @@ permissions:
   security-events: write
 
 jobs:
-  # Maps each requested platform to the native runner that builds it without
-  # QEMU emulation, so `docker` below can fan out into one job per platform.
-  matrix:
-    name: Resolve platform matrix
-    runs-on: ubuntu-latest
-    outputs:
-      include: ${{ steps.build.outputs.include }}
-    steps:
-      - name: Map platforms to native runners
-        id: build
-        env:
-          PLATFORMS: ${{ inputs.platforms }}
-        run: |
-          include="[]"
-          IFS=',' read -ra PLATS <<< "$PLATFORMS"
-          for raw in "${PLATS[@]}"; do
-            p="$(echo "$raw" | xargs)"
-            case "$p" in
-              linux/amd64) runner="ubuntu-latest" ;;
-              linux/arm64) runner="ubuntu-24.04-arm" ;;
-              *)
-                echo "::error::Unsupported platform '$p'. Supported: linux/amd64, linux/arm64."
-                exit 1
-                ;;
-            esac
-            scope="${p//\//-}"
-            include=$(echo "$include" | jq -c --arg platform "$p" --arg runner "$runner" --arg scope "$scope" '. + [{"platform": $platform, "runner": $runner, "scope": $scope}]')
-          done
-          echo "include=$include" >> "$GITHUB_OUTPUT"
-
   docker:
-    name: Smoke build (${{ matrix.platform }})
-    needs: matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.matrix.outputs.include) }}
-    runs-on: ${{ matrix.runner }}
+    name: Smoke build (buildx, no push)
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # amd64 is the only leg that can `load` a single-arch image into the
-      # local Docker daemon, so it's also the one used for the vulnerability
-      # scan below — no separate scan-only build needed.
-      - name: Build image (smoke test)
+      # Same reasoning as docker-release.yml: multi-arch builds with
+      # push:false aren't docker-loadable, so this builds a linux/amd64-only
+      # copy with load:true purely to scan. Reuses the buildx cache the smoke
+      # build below also reads from, so the extra build is cheap.
+      - name: Build image for vulnerability scan (linux/amd64)
+        if: inputs.scan_image
         uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: false
-          load: ${{ inputs.scan_image && matrix.platform == 'linux/amd64' }}
-          tags: ${{ inputs.image_name }}:smoke
-          cache-from: type=gha,scope=${{ matrix.scope }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.scope }}
+          load: true
+          tags: ${{ inputs.image_name }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Scan image for vulnerabilities
-        if: inputs.scan_image && matrix.platform == 'linux/amd64'
+        if: inputs.scan_image
         uses: sisques-labs/workflows/.github/actions/trivy-scan@main
         with:
-          image_ref: ${{ inputs.image_name }}:smoke
+          image_ref: ${{ inputs.image_name }}:scan
           block_on_critical: "true"
+
+      - name: Build image (smoke test all platforms)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: false
+          load: false
+          tags: ${{ inputs.image_name }}:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
