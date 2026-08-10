@@ -305,7 +305,7 @@ jobs:
       # Build first WITHOUT pushing: if the image cannot be built, nothing is
       # published anywhere (no git tag, no registry tag, no GitHub Release).
       - name: Build image (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
@@ -351,7 +351,7 @@ jobs:
       # The registry push reuses the buildx cache from the build step, so this
       # is a near-instant publish of the exact image that was just built.
       - name: Push image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
