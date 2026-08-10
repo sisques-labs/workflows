@@ -631,8 +631,8 @@ jobs:
 - `image_name` (required): local tag used for the smoke build/scan — never pushed anywhere.
 - `dockerfile` (optional, default: `"Dockerfile"`)
 - `context` (optional, default: `"."`)
-- `platforms` (optional, default: `"linux/amd64,linux/arm64"`): comma-separated platforms the smoke build validates. Each platform builds **natively** on its own runner (`ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for `linux/arm64`) via a matrix — no QEMU emulation. `linux/arm64` requires GitHub-hosted arm64 runners to be available to the calling repo (public repos, or Team/Enterprise on private repos); if unavailable, pass `platforms: linux/amd64` only.
-- `scan_image` (optional, default: `false`): scan with Trivy and **fail the check** on a CRITICAL vulnerability with a known fix. Runs once, on the `linux/amd64` leg.
+- `platforms` (optional, default: `"linux/amd64,linux/arm64"`): platforms the smoke build validates
+- `scan_image` (optional, default: `false`): scan with Trivy and **fail the check** on a CRITICAL vulnerability with a known fix
 
 **Docker Release / Release Train (report-only):**
 
@@ -647,23 +647,13 @@ permissions:
   security-events: write # required for the SARIF upload
 ```
 
-**Build strategy:**
+**How it works (both workflows):**
 
-- `docker-smoke-build.yml` builds each requested platform **natively**, one
-  per matrix leg (`ubuntu-latest` for `linux/amd64`, `ubuntu-24.04-arm` for
-  `linux/arm64`) — no QEMU. The `linux/amd64` leg is also the only one that
-  can `docker load` a single-arch image locally, so `scan_image` reuses that
-  same build/load as its scan target instead of a separate scan-only build.
-- `docker-release.yml`/`release-train.yml` still build one true multi-arch
-  manifest with `push: false` first (needed to publish a single manifest
-  list across platforms), which can't be `docker load`ed. When `scan_image`
-  is enabled there, a second `linux/amd64`-only image is built with
-  `load: true` purely to scan locally — it reuses the same buildx cache as
-  the real build, so the extra build is cheap, but that workflow's real
-  multi-arch build still goes through QEMU for the `linux/arm64` leg.
-
-**Scan behavior (both workflows):**
-
+- Multi-arch images built with `push: false` can't be `docker load`ed, so
+  when `scan_image` is enabled a second, `linux/amd64`-only image is built
+  with `load: true` purely to scan locally — it's never pushed anywhere.
+  It reuses the same buildx cache as the real build, so the extra build is
+  cheap.
 - A full-severity SARIF report is always generated and uploaded to the
   consumer repo's Security → Code scanning tab, regardless of whether
   anything CRITICAL was found — this step never fails the job.
