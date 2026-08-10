@@ -17,11 +17,10 @@ runs:
     - name: Checkout repository
       uses: actions/checkout@v7.0.1
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v7.0.0
-      with:
-        node-version: ${{ inputs.node_version }}
-
+    # pnpm must be installed and on PATH *before* actions/setup-node when
+    # using cache: pnpm below — setup-node shells out to `pnpm store path`
+    # to resolve the cache directory, which fails silently (no caching) if
+    # pnpm isn't available yet.
     - name: Install pnpm
       if: inputs.pnpm_version != ''
       uses: pnpm/action-setup@v6
@@ -31,3 +30,9 @@ runs:
     - name: Install pnpm (auto-detect)
       if: inputs.pnpm_version == ''
       uses: pnpm/action-setup@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v7.0.0
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: pnpm
