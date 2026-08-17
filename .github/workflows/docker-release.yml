@@ -209,7 +209,7 @@ jobs:
       # because git-cliff-action splices these args into a bash command line.
       - name: Generate CHANGELOG.md (full history)
         if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@v4.8.0
         with:
           config: cliff.toml
           args: --verbose --tag ${{ steps.bump.outputs.tag }} --ignore-tags '.*-(alpha|beta|rc).*'
@@ -242,7 +242,7 @@ jobs:
       - name: Generate release body fragment
         if: steps.cliff_detect.outputs.present == 'true' && github.ref_name == 'main'
         id: cliff_body
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@v4.8.0
         with:
           config: cliff.toml
           args: --verbose --strip header --tag ${{ steps.bump.outputs.tag }} ${{ steps.notes_range.outputs.args }}
