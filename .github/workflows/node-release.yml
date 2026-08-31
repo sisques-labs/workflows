@@ -35,6 +35,16 @@ on:
         description: "Custom release command (defaults to 'pnpm release' or 'npx semantic-release')"
         required: false
         type: string
+      sync_develop_after_stable:
+        description: "After a stable release on main, merge main back into develop so it never diverges on package.json/CHANGELOG.md. No-op if develop doesn't exist or nothing was released."
+        required: false
+        type: boolean
+        default: false
+      sync_staging_after_stable:
+        description: "After a stable release on main, merge main back into staging so it never diverges on package.json/CHANGELOG.md. No-op if staging doesn't exist or nothing was released."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -92,6 +102,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Run semantic-release
+        id: semantic_release
         working-directory: ${{ inputs.working_directory || inputs.app_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,4 +131,45 @@ jobs:
             fi
           fi
 
+          # Tracked so the sync-back steps below only run when semantic-release
+          # actually committed a version bump (it exits 0 even when there was
+          # nothing to release).
+          BEFORE_SHA="$(git rev-parse HEAD)"
           eval "$RELEASE_CMD"
+          AFTER_SHA="$(git rev-parse HEAD)"
+          if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # semantic-release runs independently per branch (develop/staging/main),
+      # each committing its own version bump (package.json/CHANGELOG.md)
+      # straight to that branch with no relation to the others. Left alone,
+      # develop/staging permanently diverge from main's bump commits and every
+      # later promotion PR conflicts on those same lines. Syncing main back
+      # down after each stable release closes that gap, mirroring the
+      # sync_develop_after_stable step in docker-release.yml.
+      - name: Sync stable to develop
+        if: github.ref_name == 'main' && steps.semantic_release.outputs.released == 'true' && inputs.sync_develop_after_stable
+        run: |
+          git fetch origin main develop
+          if ! git show-ref --verify --quiet refs/remotes/origin/develop; then
+            echo "develop branch does not exist — skipping sync"
+            exit 0
+          fi
+          git checkout develop
+          git merge origin/main -m "chore(release): sync stable from main"
+          git push origin develop
+
+      - name: Sync stable to staging
+        if: github.ref_name == 'main' && steps.semantic_release.outputs.released == 'true' && inputs.sync_staging_after_stable
+        run: |
+          git fetch origin main staging
+          if ! git show-ref --verify --quiet refs/remotes/origin/staging; then
+            echo "staging branch does not exist — skipping sync"
+            exit 0
+          fi
+          git checkout staging
+          git merge origin/main -m "chore(release): sync stable from main"
+          git push origin staging
