@@ -1,0 +1,259 @@
+name: macOS Cask Release
+
+# Reusable workflow: builds a macOS app on macos-14, tags and publishes a
+# GitHub Release, and (stable channel only) renders and pushes a Homebrew
+# Cask to a tap repository. Channel detection (should_release/release_type/
+# next_version) stays in the caller — this workflow only executes once the
+# caller has already decided a release is due. Mirrors docker-release.yml's
+# tag/release mechanics, adapted for a single-package macOS app with no
+# release commit in the consumer repo (see homebrew-release-train design.md,
+# decision 3).
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: "Application name (e.g. Portero). Used to derive the built .app.zip asset name and, when cask_name is empty, the Cask filename."
+        required: true
+        type: string
+      cask_name:
+        description: "Homebrew Cask name (lowercase, e.g. portero). Defaults to app_name lowercased."
+        required: false
+        type: string
+        default: ""
+      tap_repository:
+        description: "Homebrew tap repository that receives the rendered Cask (owner/repo)."
+        required: false
+        type: string
+        default: "sisques-labs/homebrew-tap"
+      cask_template:
+        description: "Path (in the consumer's checkout) to the Cask template. Rendered with {{VERSION}}/{{SHA256}} substituted; no other placeholders are supported."
+        required: false
+        type: string
+        default: "Packaging/cask.rb.tmpl"
+      build_script:
+        description: "Path (in the consumer's checkout) to the packaging script. Invoked as `VERSION=<next_version> <build_script>` and expected to produce `.build/<app_name>-v<next_version>.app.zip`."
+        required: false
+        type: string
+        default: "Scripts/build-app.sh"
+      release_type:
+        description: "Release channel (alpha | beta | stable), computed by the caller's release-train-detect step."
+        required: true
+        type: string
+      next_version:
+        description: "Exact version to release (e.g. 1.2.0), computed by the caller's release-train-detect step. The git tag is derived as v<next_version>."
+        required: true
+        type: string
+      runner:
+        description: "Runner label for the build/release job."
+        required: false
+        type: string
+        default: "macos-14"
+      sync_branches_after_stable:
+        description: "Comma-separated branch names to fast-forward/merge from the triggering branch after a stable release (e.g. develop,staging). Branches that don't exist on the remote are skipped without failing. Ignored on non-stable channels."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        description: "Token with contents:write on tap_repository. Required only when release_type=stable — the workflow fails fast if it's empty on that channel. Forward it from the caller workflow's secrets: block (or use secrets: inherit)."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, release & publish Cask
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # Fail before spending any build minutes: a stable release with no tap
+      # token would build and tag successfully, then die on the tap push,
+      # leaving a published Release whose Cask never landed.
+      - name: Validate stable-channel secret
+        if: inputs.release_type == 'stable'
+        run: |
+          if [ -z "${{ secrets.HOMEBREW_TAP_TOKEN }}" ]; then
+            echo "::error::release_type=stable requires a non-empty HOMEBREW_TAP_TOKEN secret to publish to ${{ inputs.tap_repository }}. Forward it from the caller workflow's secrets: block."
+            exit 1
+          fi
+
+      - name: Checkout consumer
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Compute tag
+        id: tag
+        run: echo "tag=v${{ inputs.next_version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against duplicate tag
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          git fetch origin "refs/tags/${TAG}" 2>/dev/null || true
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Git tag ${TAG} already exists. Refusing to publish a duplicate release."
+            exit 1
+          fi
+
+      - name: Build & package
+        run: |
+          chmod +x "${{ inputs.build_script }}"
+          VERSION="${{ inputs.next_version }}" "${{ inputs.build_script }}"
+
+      - name: Compute checksum
+        id: checksum
+        run: |
+          ASSET=".build/${{ inputs.app_name }}-v${{ inputs.next_version }}.app.zip"
+          if [ ! -f "$ASSET" ]; then
+            echo "::error::Expected packaged asset not found at ${ASSET}. Check build_script's output naming."
+            exit 1
+          fi
+          SHA=$(shasum -a 256 "$ASSET" | awk '{print $1}')
+          {
+            echo "asset_path=${ASSET}"
+            echo "asset_name=$(basename "$ASSET")"
+            echo "sha256=${SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Tag-only push (no commit to the consumer branch): the reusable
+      # workflow never mutates the consumer repo's history, so there is
+      # nothing else to publish and this push cannot retrigger the caller's
+      # push-triggered workflow (see design.md, decision 3).
+      - name: Tag & push release
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          git tag "${TAG}"
+          for attempt in 1 2 3; do
+            if git push --atomic origin "refs/tags/${TAG}"; then
+              exit 0
+            fi
+            echo "git push failed (attempt ${attempt}), retrying in $((attempt * 5))s..."
+            sleep $((attempt * 5))
+            git fetch origin "${{ github.ref_name }}"
+            if ! git merge-base --is-ancestor "origin/${{ github.ref_name }}" HEAD; then
+              echo "::error::Branch ${{ github.ref_name }} moved during the release. Aborting; the next push will release these changes."
+              exit 1
+            fi
+          done
+          echo "::error::Failed to push tag ${TAG} after 3 attempts."
+          exit 1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ inputs.release_type != 'stable' }}
+          files: ${{ steps.checksum.outputs.asset_path }}
+
+      # Confirms the asset GitHub actually stored matches what was built,
+      # catching truncated/corrupted uploads before anything downstream
+      # (the Cask's sha256) is derived from a possibly-bad asset.
+      - name: Verify published asset checksum
+        run: |
+          ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/${{ steps.checksum.outputs.asset_name }}"
+          curl -fsSL -H "Authorization: token ${{ github.token }}" -o downloaded.zip "$ASSET_URL"
+          DOWNLOADED_SHA=$(shasum -a 256 downloaded.zip | awk '{print $1}')
+          if [ "$DOWNLOADED_SHA" != "${{ steps.checksum.outputs.sha256 }}" ]; then
+            echo "::error::Downloaded asset checksum (${DOWNLOADED_SHA}) does not match the locally computed checksum (${{ steps.checksum.outputs.sha256 }})."
+            exit 1
+          fi
+          rm -f downloaded.zip
+
+      - name: Checkout tap
+        if: inputs.release_type == 'stable'
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ inputs.tap_repository }}
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Verify tap checkout
+        if: inputs.release_type == 'stable'
+        run: |
+          if [ ! -d tap/.git ]; then
+            echo "::error::Expected a tap checkout at ./tap but tap/.git is missing."
+            exit 1
+          fi
+
+      # The tap is a generated mirror: the whole Cask body is rendered from
+      # the consumer's template every run, never hand-patched in place, so a
+      # manual edit on the tap is unambiguously an error the next run erases.
+      - name: Render Cask
+        if: inputs.release_type == 'stable'
+        id: render_cask
+        run: |
+          CASK_NAME="${{ inputs.cask_name }}"
+          if [ -z "$CASK_NAME" ]; then
+            CASK_NAME=$(echo "${{ inputs.app_name }}" | tr '[:upper:]' '[:lower:]')
+          fi
+          CASK_FILE="tap/Casks/${CASK_NAME}.rb"
+          sed \
+            -e "s/{{VERSION}}/${{ inputs.next_version }}/g" \
+            -e "s/{{SHA256}}/${{ steps.checksum.outputs.sha256 }}/g" \
+            "${{ inputs.cask_template }}" > "$CASK_FILE"
+
+          if ! grep -qE '^  sha256 "[0-9a-f]{64}"$' "$CASK_FILE"; then
+            echo "::error::Rendered Cask ${CASK_FILE} is missing a valid 64-character lowercase-hex sha256 line."
+            exit 1
+          fi
+          if grep -q '{{' "$CASK_FILE"; then
+            echo "::error::Rendered Cask ${CASK_FILE} still contains an unsubstituted {{ placeholder."
+            exit 1
+          fi
+          echo "cask_file=${CASK_FILE}" >> "$GITHUB_OUTPUT"
+
+      # Every tap operation is explicit `git -C tap ...` — never an ambient
+      # `cd tap` — per design.md's threat matrix (Git repository selection).
+      # A single fetch+rebase retry on non-fast-forward, then fail loud, per
+      # the threat matrix's Push state row; empty-diff commits are skipped so
+      # re-running an already-correct stable version stays a no-op.
+      - name: Commit & push Cask
+        if: inputs.release_type == 'stable'
+        run: |
+          git -C tap config user.name "github-actions[bot]"
+          git -C tap config user.email "github-actions[bot]@users.noreply.github.com"
+          CASK_FILE="${{ steps.render_cask.outputs.cask_file }}"
+          RELATIVE="${CASK_FILE#tap/}"
+          git -C tap add "$RELATIVE"
+          if git -C tap diff --staged --quiet; then
+            echo "No changes to the Cask — skipping commit (idempotent re-run)."
+            exit 0
+          fi
+          git -C tap commit -m "chore(cask): update to ${{ steps.tag.outputs.tag }}"
+          DEFAULT_BRANCH=$(git -C tap symbolic-ref --short HEAD)
+          if git -C tap push origin "HEAD:refs/heads/${DEFAULT_BRANCH}"; then
+            exit 0
+          fi
+          echo "tap push was not fast-forward — retrying once after fetch+rebase."
+          git -C tap fetch origin "${DEFAULT_BRANCH}"
+          git -C tap rebase "origin/${DEFAULT_BRANCH}"
+          if git -C tap push origin "HEAD:refs/heads/${DEFAULT_BRANCH}"; then
+            exit 0
+          fi
+          echo "::error::Failed to push Cask update to ${{ inputs.tap_repository }} after one fetch+rebase retry."
+          exit 1
+
+      - name: Sync stable release into downstream channels
+        if: inputs.release_type == 'stable' && inputs.sync_branches_after_stable != ''
+        env:
+          HUSKY: "0"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          IFS=',' read -ra BRANCHES <<< "${{ inputs.sync_branches_after_stable }}"
+          for BRANCH in "${BRANCHES[@]}"; do
+            BRANCH="$(echo "$BRANCH" | xargs)"
+            [ -z "$BRANCH" ] && continue
+            git fetch origin "$BRANCH"
+            if ! git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
+              echo "Branch ${BRANCH} does not exist — skipping sync."
+              continue
+            fi
+            git checkout "$BRANCH"
+            git merge "${{ steps.tag.outputs.tag }}" -m "chore(release): sync stable ${{ steps.tag.outputs.tag }} from ${{ github.ref_name }}"
+            git push origin "$BRANCH"
+          done
