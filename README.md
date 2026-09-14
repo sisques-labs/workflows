@@ -10,7 +10,8 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── node-ci.yml              # Lint, test, and build a Node.js app as parallel jobs
 │   ├── node-release.yml        # Node.js release workflow with semantic-release
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
-│   ├── docker-release.yml      # Version bump + Docker build & publish
+│   ├── trunk-ci-cd.yml         # Continuous build + dev/pre deploy for trunk-based repos
+│   ├── docker-release.yml      # Version bump + Docker build & publish (or promote, for trunk-based repos)
 │   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
 │   ├── codeql.yml              # CodeQL security analysis (init + analyze)
 │   ├── pr-labeler.yml          # Auto-label PRs by changed files
@@ -375,6 +376,101 @@ jobs:
 **Testing:** the version-computation logic is covered by
 `tests/release-train-detect.test.sh`, which runs on every PR to this
 repository (including a regression test for the stale-beta bug).
+
+### Trunk CI/CD
+
+For repos on trunk-based development (a single long-lived `main`, no
+`develop`/`staging`), `trunk-ci-cd.yml` replaces `release-train.yml`. See
+`openspec/changes/trunk-based-ci-cd/design.md` in this repo for the full
+rationale. **This workflow is purely additive** — it doesn't touch
+`release-train.yml` or its branch→channel mapping, so no existing consumer
+is affected by its existence. A repo opts in only by pointing its own
+`push: [main]` workflow at `trunk-ci-cd.yml`.
+
+Unlike Release Train, every merge to `main` publishes an image but **never**
+a version, a git tag, or a GitHub Release:
+
+| Trigger          | Publishes                          | Then                     |
+| ----------------- | ----------------------------------- | ------------------------- |
+| push to `main`    | `:sha-<shortsha>`, `:edge`         | deploy to `dev`, then `pre` (`needs:`) |
+| manual release cut | promotes the validated digest to `:X.Y.Z`, `:latest` | (see `docker-release.yml` `bump_mode: promote` below) |
+
+**Usage (consumer repository):**
+
+```yaml
+name: Trunk CI/CD
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pipeline:
+    uses: sisques-labs/workflows/.github/workflows/trunk-ci-cd.yml@main
+    with:
+      image_name: sisqueslabs/my-app
+      ghcr_image_name: ghcr.io/sisques-labs/my-app
+      push_ghcr: true
+      node_version: "22"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+**`deploy-dev`/`deploy-pre` are placeholders.** No consuming repo has real
+`dev`/`pre` infrastructure provisioned yet, so both jobs currently only log
+what they would deploy. The job graph and its `needs:` ordering (`pre` only
+ever runs after `dev` succeeds) are the actual deliverable — replace the
+placeholder step with a real deploy once a repo has an environment to target.
+Configure the `dev`/`pre` GitHub Environments (and any required-reviewer
+gates) in the consuming repo's own Settings — this shared workflow only
+references the environment names by convention.
+
+**Cutting a `prod` release (`bump_mode: promote`):** `docker-release.yml`
+gains a `promote` bump mode alongside `legacy`/`release-train`. It skips the
+build entirely and retags an already-published digest — the one that went
+through `dev` and `pre` above — onto the release tags with
+`docker buildx imagetools create`, so the exact bytes validated in `pre` are
+what ships to `prod`. Everything else (version bump, git tag, changelog,
+GitHub Release) works exactly like `legacy` mode.
+
+```yaml
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: choice
+        options: [patch, minor, major]
+      source_digest:
+        description: "Digest to promote (from a trunk-ci-cd.yml run's image_digest output)"
+        required: true
+        type: string
+
+jobs:
+  release:
+    uses: sisques-labs/workflows/.github/workflows/docker-release.yml@main
+    with:
+      image_name: sisqueslabs/my-app
+      version: ${{ inputs.version }}
+      release_type: stable
+      bump_mode: promote
+      source_digest: ${{ inputs.source_digest }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+**⚠️ Unvalidated risk:** `imagetools create` must copy the full multi-arch
+manifest list (`linux/amd64,linux/arm64`), not a single-platform digest.
+This has not yet been validated against a real multi-arch image — confirm
+it works before relying on `bump_mode: promote` for an actual production
+release.
 
 ### Branch sync after a stable release
 

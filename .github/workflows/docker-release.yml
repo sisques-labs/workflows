@@ -58,12 +58,17 @@ on:
         type: string
         default: ""
       bump_mode:
-        description: "Version bump mode (legacy | release-train)"
+        description: "Version bump mode (legacy | release-train | promote)"
         required: false
         type: string
         default: legacy
       next_version:
         description: "Exact version to publish (required when bump_mode=release-train, computed by release-train-detect)"
+        required: false
+        type: string
+        default: ""
+      source_digest:
+        description: "Fully qualified digest ref of an already-published image to promote (e.g. sisqueslabs/beacon-api@sha256:...). Required when bump_mode=promote — see trunk-ci-cd.yml's image_digest output."
         required: false
         type: string
         default: ""
@@ -123,6 +128,10 @@ jobs:
           fi
           if [ "${{ inputs.bump_mode }}" = "release-train" ] && [ -z "${{ inputs.next_version }}" ]; then
             echo "::error::bump_mode=release-train requires a non-empty next_version input."
+            exit 1
+          fi
+          if [ "${{ inputs.bump_mode }}" = "promote" ] && [ -z "${{ inputs.source_digest }}" ]; then
+            echo "::error::bump_mode=promote requires a non-empty source_digest input."
             exit 1
           fi
 
@@ -310,9 +319,12 @@ jobs:
       # built with push:false aren't docker-loadable, so this builds a
       # linux/amd64-only copy with load:true purely to scan locally — it's
       # never pushed. This reuses the buildx cache the real multi-arch build
-      # below will also read from, so the extra build is cheap.
+      # below will also read from, so the extra build is cheap. Skipped for
+      # bump_mode=promote: that mode never builds from source, so there is
+      # nothing local to scan (the promoted digest was already scanned when
+      # it was originally built, e.g. by trunk-ci-cd.yml).
       - name: Build image for vulnerability scan (linux/amd64)
-        if: inputs.scan_image
+        if: inputs.scan_image && inputs.bump_mode != 'promote'
         uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
@@ -327,7 +339,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan image for vulnerabilities
-        if: inputs.scan_image
+        if: inputs.scan_image && inputs.bump_mode != 'promote'
         uses: sisques-labs/workflows/.github/actions/trivy-scan@main
         with:
           image_ref: ${{ inputs.image_name }}:scan
@@ -349,7 +361,9 @@ jobs:
 
       # Build first WITHOUT pushing: if the image cannot be built, nothing is
       # published anywhere (no git tag, no registry tag, no GitHub Release).
+      # Skipped for bump_mode=promote — see "Promote existing image" below.
       - name: Build image (no push)
+        if: inputs.bump_mode != 'promote'
         uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
@@ -395,7 +409,9 @@ jobs:
 
       # The registry push reuses the buildx cache from the build step, so this
       # is a near-instant publish of the exact image that was just built.
+      # Skipped for bump_mode=promote — see "Promote existing image" below.
       - name: Push image
+        if: inputs.bump_mode != 'promote'
         uses: docker/build-push-action@v7.3.0
         with:
           context: ${{ inputs.context }}
@@ -407,10 +423,30 @@ jobs:
             node_auth_token=${{ secrets.NODE_AUTH_TOKEN }}
           cache-from: type=gha
 
-      # By the time this step runs, "Push image" has already succeeded (a
-      # failed push stops the job before reaching here), so image_name was
-      # published and the Docker Hub login above is known-good — no separate
-      # "did we actually publish" check is needed.
+      # bump_mode=promote never builds from source: this runs only after the
+      # git tag above is already pushed, so the same "tag can never lag
+      # behind a published image" guarantee holds. It retags the exact
+      # digest that already passed through pre (see trunk-ci-cd.yml) onto the
+      # release tags computed earlier — the bytes that ship to prod are
+      # byte-for-byte what was validated in pre, never a fresh rebuild.
+      - name: Promote existing image (imagetools)
+        if: inputs.bump_mode == 'promote'
+        env:
+          TAGS: ${{ steps.tags.outputs.list }}
+          SOURCE_DIGEST: ${{ inputs.source_digest }}
+        run: |
+          ARGS=()
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            ARGS+=(--tag "$tag")
+          done <<< "$TAGS"
+          docker buildx imagetools create "${ARGS[@]}" "$SOURCE_DIGEST"
+
+      # By the time this step runs, either "Push image" or "Promote existing
+      # image" has already succeeded (a failure in either stops the job
+      # before reaching here), so image_name was published and the Docker
+      # Hub login above is known-good — no separate "did we actually
+      # publish" check is needed.
       #
       # NOTE: peter-evans/dockerhub-description requires a Docker Hub
       # password/PAT with Read/Write/Delete scope. A token scoped only for
