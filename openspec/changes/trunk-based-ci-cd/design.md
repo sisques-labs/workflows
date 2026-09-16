@@ -79,10 +79,22 @@ Fixed: `promote` now computes both automatically —
 
 This makes cutting a release a genuine one-click action (`workflow_dispatch` with no required fields), matching the spirit of the whole migration: humans decide *when* to release, the pipeline decides *what* the release contains.
 
+### D9 — Ephemeral tag retention (discovered during the beacon-api pilot)
+
+Every merge to `main` publishes `:sha-<shortsha>` (D1) with no expiry — unlike the old branch-per-channel model, there is no `develop`/`staging` boundary to bound how many of these accumulate, so left alone the tag count grows forever. This is a real gap, not a hypothetical: the old model had the identical problem (`release-train.yml` never pruned `alpha.N`/`beta.N` tags either) but bringing back environment branches to "fix" it would reintroduce exactly what this migration removes — a rebuild-per-branch model that breaks the "build once, promote the same artifact" guarantee (D2). The fix has to be orthogonal to branch topology.
+
+New reusable workflow `image-cleanup.yml` + composite action `image-tag-cleanup`, invoked on a schedule the *consumer* repo owns (this shared workflow has no `on:` trigger of its own). Design:
+
+- **Never touches an official tag.** An image/tag is only a deletion candidate when **every** tag it carries matches `ephemeral_tag_prefix` (default `sha-`). A stable release, `:latest`, `:edge`, or a legacy `:alpha`/`:beta`/`:X.Y.Z-alpha.N` tag never matches that prefix, so it's never even considered — this is a hard filter, not a heuristic, and it's the one piece of this design covered by a pure, offline-testable unit test (`select-deletions.sh` + `tests/image-tag-cleanup-select.test.sh`), independent of any live registry call.
+- **`keep_min` is a floor, `retention_days` is the trigger.** The `keep_min` most recently published ephemeral tags are always kept regardless of age (so there's always something to promote even during a slow release cadence); only entries beyond that floor are deleted once older than `retention_days`.
+- **Generic across registries and repos.** The same selection logic runs against Docker Hub (per-tag) and GHCR (per-package-version, which can carry multiple tags — a version is skipped entirely if any of its tags is non-ephemeral). `ephemeral_tag_prefix` is configurable per consumer, so a repo using a different continuous-build tag scheme isn't hardcoded to `sha-`.
+- **`dry_run` is the required first step on any new repo** — logs what would be deleted without touching the registry.
+
 ## Risks / Trade-offs
 
 - **[Risk] Multi-arch digest promotion is unproven** → Validate `imagetools create` against a real multi-platform image before beacon-api's pilot relies on it for an actual prod release.
 - **[Risk] Downstream consumers pinned to `:alpha`/`:beta` tags** → Each repo must audit this before migrating; out of scope for this shared-workflow change.
+- **[Risk] Cleanup deletes a tag mid-promotion** → Extremely narrow window (between `trunk-ci-cd.yml` publishing a digest and a human running `release.yml` against it); mitigated by `keep_min` defaulting to 5, which comfortably covers any realistic gap between "build validated in pre" and "someone clicks release."
 - **[Trade-off] `deploy-dev`/`deploy-pre` are placeholders** → The pipeline shape ships now; real deploy logic is deferred until a repo has infrastructure to target.
 - **[Trade-off] Org-wide standardization without a forced cutover** → Slower convergence (repos migrate on their own schedule) in exchange for zero blast radius on this change.
 
