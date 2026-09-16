@@ -68,7 +68,7 @@ on:
         type: string
         default: ""
       source_digest:
-        description: "Fully qualified digest ref of an already-published image to promote (e.g. sisqueslabs/beacon-api@sha256:...). Required when bump_mode=promote — see trunk-ci-cd.yml's image_digest output."
+        description: "Fully qualified digest ref of an already-published image to promote (e.g. sisqueslabs/beacon-api@sha256:...) — see trunk-ci-cd.yml's image_digest output. Optional for bump_mode=promote: leave empty to auto-resolve the current :edge tag (the latest build validated on main)."
         required: false
         type: string
         default: ""
@@ -130,10 +130,6 @@ jobs:
             echo "::error::bump_mode=release-train requires a non-empty next_version input."
             exit 1
           fi
-          if [ "${{ inputs.bump_mode }}" = "promote" ] && [ -z "${{ inputs.source_digest }}" ]; then
-            echo "::error::bump_mode=promote requires a non-empty source_digest input."
-            exit 1
-          fi
 
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -189,7 +185,7 @@ jobs:
       # Legacy mode: manual workflow_dispatch releases bump relative to the
       # version currently in package.json.
       - name: Bump version (legacy)
-        if: inputs.bump_mode != 'release-train'
+        if: inputs.bump_mode == 'legacy'
         id: bump_legacy
         run: |
           if [ "${{ inputs.release_type }}" = "stable" ]; then
@@ -200,12 +196,40 @@ jobs:
           echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Promote mode: there is only one channel (stable) and no manual
+      # "version" input to ask for — the bump is computed the same way
+      # release-train-detect does it for its `main` channel: scan
+      # conventional commits since the latest stable tag (feat: -> minor,
+      # a breaking-change marker -> major, anything else -> patch). Trunk-
+      # based main only ever moves forward via reviewed PRs, so this range
+      # is exactly "what shipped since the last release."
+      - name: Set version (promote)
+        if: inputs.bump_mode == 'promote'
+        id: bump_promote
+        run: |
+          LATEST_STABLE=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -n "$LATEST_STABLE" ]; then RANGE="${LATEST_STABLE}..HEAD"; else RANGE="HEAD"; fi
+          LOG=$(git log "$RANGE" --pretty='%s%n%b' 2>/dev/null || true)
+          if echo "$LOG" | grep -qiE '^[a-z]+(\([^)]*\))?!:' || echo "$LOG" | grep -qE '^BREAKING[ -]CHANGE:'; then
+            BUMP="major"
+          elif echo "$LOG" | grep -qiE '^feat(\([^)]*\))?:'; then
+            BUMP="minor"
+          else
+            BUMP="patch"
+          fi
+          NEW_VERSION=$(npm version "$BUMP" --no-git-tag-version)
+          echo "version=${NEW_VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Export version outputs
         id: bump
         run: |
           if [ "${{ inputs.bump_mode }}" = "release-train" ]; then
             echo "version=${{ steps.bump_train.outputs.version }}" >> "$GITHUB_OUTPUT"
             echo "tag=${{ steps.bump_train.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.bump_mode }}" = "promote" ]; then
+            echo "version=${{ steps.bump_promote.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ steps.bump_promote.outputs.tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "version=${{ steps.bump_legacy.outputs.version }}" >> "$GITHUB_OUTPUT"
             echo "tag=${{ steps.bump_legacy.outputs.tag }}" >> "$GITHUB_OUTPUT"
@@ -359,6 +383,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # Only runs when the caller didn't pass an explicit source_digest —
+      # the common case is "release whatever's currently on :edge" (the
+      # latest build trunk-ci-cd.yml validated on main), so this is what
+      # makes bump_mode=promote a true one-click release with no required
+      # inputs. Passing source_digest explicitly still overrides this, e.g.
+      # to release an earlier commit while main has since moved on.
+      - name: "Resolve source digest (auto: latest :edge build)"
+        if: inputs.bump_mode == 'promote' && inputs.source_digest == ''
+        id: resolve_digest
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "${{ inputs.image_name }}:edge" | awk '/^Digest:/{print $2; exit}')
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Could not resolve the :edge digest for ${{ inputs.image_name }}. Has trunk-ci-cd.yml published a build on main yet?"
+            exit 1
+          fi
+          echo "digest=${{ inputs.image_name }}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
       # Build first WITHOUT pushing: if the image cannot be built, nothing is
       # published anywhere (no git tag, no registry tag, no GitHub Release).
       # Skipped for bump_mode=promote — see "Promote existing image" below.
@@ -433,7 +474,7 @@ jobs:
         if: inputs.bump_mode == 'promote'
         env:
           TAGS: ${{ steps.tags.outputs.list }}
-          SOURCE_DIGEST: ${{ inputs.source_digest }}
+          SOURCE_DIGEST: ${{ inputs.source_digest != '' && inputs.source_digest || steps.resolve_digest.outputs.digest }}
         run: |
           ARGS=()
           while IFS= read -r tag; do
