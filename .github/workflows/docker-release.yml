@@ -108,10 +108,16 @@ permissions:
   # never exercise the login step. Callers MUST still declare packages: write
   # in the consumer workflow for the permission to be granted to GITHUB_TOKEN.
   packages: write
-  # security-events: write is required ONLY when scan_image=true, to upload
-  # the Trivy SARIF report. Same story as packages: write above — callers
-  # that don't enable scan_image never exercise the upload step, but callers
-  # that DO must also declare security-events: write themselves.
+  # security-events: write is only EXERCISED when scan_image=true (to upload
+  # the Trivy SARIF report), but GitHub validates every caller's granted
+  # permissions against this workflow's top-level declaration statically,
+  # not against which steps actually run — so EVERY caller must declare
+  # security-events: write in its own workflow, even one that never sets
+  # scan_image: true. Omitting it fails the run before any job starts
+  # ("requesting security-events: write, but is only allowed
+  # security-events: none") — this bit beacon-api's first real release.yml
+  # run (bump_mode=promote never passes scan_image, so it looked safe to
+  # drop, but the declaration here is unconditional regardless).
   security-events: write
 
 jobs:

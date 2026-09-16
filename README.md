@@ -460,6 +460,16 @@ on:
         required: false
         type: string
 
+# security-events: write is required here even though this example never
+# sets scan_image — docker-release.yml declares it unconditionally at its
+# own top level, and GitHub validates every caller's permissions against
+# that declaration statically, not against which steps actually run.
+# Omitting it fails the run before any job starts. Don't drop this.
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
 jobs:
   release:
     uses: sisques-labs/workflows/.github/workflows/docker-release.yml@main
@@ -473,6 +483,10 @@ jobs:
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    permissions:
+      contents: write
+      packages: write
+      security-events: write
 ```
 
 **⚠️ Unvalidated risk:** `imagetools create` must copy the full multi-arch
