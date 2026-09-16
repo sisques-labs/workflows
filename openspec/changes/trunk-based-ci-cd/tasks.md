@@ -19,6 +19,13 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Dry-run `trunk-ci-cd.yml` against a disposable test repo/branch to confirm the `build-and-publish` → `deploy-dev` → `deploy-pre` ordering holds
+- [ ] 4.1 Dry-run `trunk-ci-cd.yml` against a disposable test repo/branch to confirm the `build-and-publish` → `deploy-dev` → `deploy-pre` ordering holds. **In progress** — beacon-api PR #23 is the live test.
 - [ ] 4.2 Dry-run `docker-release.yml` with `bump_mode: promote` against a real multi-arch image and confirm the promoted tag pulls correctly on both architectures
-- [ ] 4.3 Confirm no existing repo's `release-train.yml`-based pipeline changed behavior after this PR merges
+- [x] 4.3 Confirm no existing repo's `release-train.yml`-based pipeline changed behavior after this PR merges — `release-train-detect.test.sh` still 36/36 after every change to `docker-release.yml`; `release-train.yml` itself untouched
+
+## 5. `promote` mode zero-input fix (D8)
+
+- [x] 5.1 Separate `bump_mode: promote`'s version step from `legacy`'s — `promote` no longer runs the manual `npm version ${{ inputs.version }}` path
+- [x] 5.2 Compute the version bump for `promote` automatically from conventional commits since the latest stable tag (mirrors `release-train-detect`'s `main`-channel logic)
+- [x] 5.3 Make `source_digest` optional for `promote`: auto-resolve the current `:edge` tag's digest via `docker buildx imagetools inspect` when not passed explicitly
+- [ ] 5.4 Dry-run a real `promote` release with zero inputs and confirm the resolved version + digest are correct — needs a real repo with an `:edge` build published (part of 4.1/4.2's live test)

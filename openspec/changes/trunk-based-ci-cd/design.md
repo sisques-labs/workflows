@@ -68,6 +68,17 @@ No file this change touches is edited in place for its existing behavior: `trunk
 
 `docker-release.yml`'s existing git-cliff + GitHub Release steps apply unchanged when `release_type: stable`. Because there is only one channel once a repo migrates, the alpha/beta/rc tag-ignoring logic in the changelog range computation becomes dead code for that repo's future releases but is not removed here (other repos still exercise it via `legacy`/`release-train` modes).
 
+### D8 — `promote` mode has zero required inputs (discovered during the beacon-api pilot)
+
+The first pilot implementation still asked a human for a `version` bump type (patch/minor/major) and a required `source_digest`, mirroring `legacy` mode's manual dropdown. That was a design bug, not an intentional choice: `bump_mode: promote`'s "Bump version" step accidentally ran the same code path as `legacy` (its `if:` condition was `!= 'release-train'`, which is also true for `promote`).
+
+Fixed: `promote` now computes both automatically —
+
+- **Version bump**: scanned from conventional commits since the latest stable tag (identical algorithm to `release-train-detect`'s `main`-channel logic: a breaking-change marker → major, `feat:` → minor, anything else → patch). There is only one channel once a repo is trunk-based, so there is nothing for a human to choose between.
+- **Source digest**: when not passed explicitly, resolved from the current `:edge` tag (the latest build `trunk-ci-cd.yml` validated on `main`) via `docker buildx imagetools inspect`. An explicit `source_digest` still overrides this, for releasing an earlier commit while `main` has since moved on.
+
+This makes cutting a release a genuine one-click action (`workflow_dispatch` with no required fields), matching the spirit of the whole migration: humans decide *when* to release, the pipeline decides *what* the release contains.
+
 ## Risks / Trade-offs
 
 - **[Risk] Multi-arch digest promotion is unproven** → Validate `imagetools create` against a real multi-platform image before beacon-api's pilot relies on it for an actual prod release.

@@ -435,8 +435,19 @@ gains a `promote` bump mode alongside `legacy`/`release-train`. It skips the
 build entirely and retags an already-published digest — the one that went
 through `dev` and `pre` above — onto the release tags with
 `docker buildx imagetools create`, so the exact bytes validated in `pre` are
-what ships to `prod`. Everything else (version bump, git tag, changelog,
-GitHub Release) works exactly like `legacy` mode.
+what ships to `prod`. Changelog and GitHub Release generation work exactly
+like `legacy` mode.
+
+**Zero required inputs — this is a one-click release.** Unlike `legacy`
+mode, `promote` never asks for a version bump type: there is only one
+channel (`stable`) once a repo is trunk-based, so the bump (patch/minor/
+major) is computed automatically from conventional commits since the
+latest stable tag — the same logic `release-train-detect` already uses for
+its `main` channel. `source_digest` is optional too: leave it empty and the
+workflow resolves the current `:edge` tag (the latest build `trunk-ci-cd.yml`
+validated on `main`) automatically. Pass `source_digest` explicitly only for
+the exceptional case of releasing an earlier commit while `main` has since
+moved on.
 
 ```yaml
 name: Release
@@ -444,12 +455,9 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        type: choice
-        options: [patch, minor, major]
       source_digest:
-        description: "Digest to promote (from a trunk-ci-cd.yml run's image_digest output)"
-        required: true
+        description: "Optional: digest to promote (from a trunk-ci-cd.yml run's image_digest output). Leave empty to auto-promote the latest :edge build."
+        required: false
         type: string
 
 jobs:
@@ -457,10 +465,11 @@ jobs:
     uses: sisques-labs/workflows/.github/workflows/docker-release.yml@main
     with:
       image_name: sisqueslabs/my-app
-      version: ${{ inputs.version }}
       release_type: stable
       bump_mode: promote
       source_digest: ${{ inputs.source_digest }}
+      run_lint: false # no rebuild happens under promote — the digest was
+      run_test: false # already lint/tested when trunk-ci-cd.yml built it
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
