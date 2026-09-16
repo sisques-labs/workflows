@@ -29,3 +29,14 @@
 - [x] 5.2 Compute the version bump for `promote` automatically from conventional commits since the latest stable tag (mirrors `release-train-detect`'s `main`-channel logic)
 - [x] 5.3 Make `source_digest` optional for `promote`: auto-resolve the current `:edge` tag's digest via `docker buildx imagetools inspect` when not passed explicitly
 - [ ] 5.4 Dry-run a real `promote` release with zero inputs and confirm the resolved version + digest are correct — needs a real repo with an `:edge` build published (part of 4.1/4.2's live test)
+
+## 6. Ephemeral tag retention (D9)
+
+- [x] 6.1 Add `.github/actions/image-tag-cleanup/select-deletions.sh` — pure, offline decision logic (which tags/versions are safe to delete) with no registry calls
+- [x] 6.2 Add `tests/image-tag-cleanup-select.test.sh` covering: empty input, a non-ephemeral tag is never selected, a mixed-tag entry is never selected, an untagged entry is never selected, `keep_min` is respected regardless of age, entries beyond `keep_min` are selected once older than `retention_days`, a custom `ephemeral_tag_prefix` only matches its own tags, GHCR-shaped (numeric id) input works the same way — 9/9 passing
+- [x] 6.3 Add `cleanup-dockerhub.sh` (lists tags via the Docker Hub API, deletes selected ones) and `cleanup-ghcr.sh` (lists package versions via the GitHub API, deletes selected ones) — both delegate the decision to 6.1, never decide themselves
+- [x] 6.4 Add composite action `.github/actions/image-tag-cleanup/action.yml` wrapping both registry scripts behind a `registry: dockerhub | ghcr` input
+- [x] 6.5 Add reusable workflow `.github/workflows/image-cleanup.yml` (`workflow_call`, no `on:` trigger of its own — the consumer owns the schedule) calling the composite action once per enabled registry
+- [x] 6.6 Add `image-tag-cleanup-select` job to this repo's own `test.yml` and confirm `shellcheck`/`actionlint` are clean on every new file
+- [x] 6.7 Document `image-cleanup.yml` usage, the never-touches-official-tags guarantee, and the `DOCKERHUB_TOKEN` Read/Write/Delete scope requirement in the README
+- [ ] 6.8 Wire `image-cleanup.yml` into beacon-api (the pilot repo) with a real `on: schedule` trigger, run once with `dry_run: true`, confirm the logged output looks correct before trusting it unattended

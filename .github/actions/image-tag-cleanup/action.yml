@@ -1,0 +1,67 @@
+name: Image tag cleanup
+description: Delete ephemeral (commit-tagged) image tags/versions older than a retention window, always keeping a minimum number, and never touching anything that doesn't match the ephemeral prefix.
+
+inputs:
+  registry:
+    description: "Which registry to clean (dockerhub | ghcr)"
+    required: true
+  image_name:
+    description: "Docker Hub image name (e.g. sisqueslabs/beacon-api). Required when registry=dockerhub."
+    required: false
+    default: ""
+  ghcr_image_name:
+    description: "GHCR image name (e.g. ghcr.io/sisques-labs/beacon-api). Required when registry=ghcr."
+    required: false
+    default: ""
+  ephemeral_tag_prefix:
+    description: "Only tags starting with this prefix are ever eligible for deletion. Everything else (stable releases, latest, edge, legacy alpha/beta/rc, ...) is always protected."
+    required: false
+    default: "sha-"
+  retention_days:
+    description: "Delete eligible tags/versions older than this many days"
+    required: false
+    default: "14"
+  keep_min:
+    description: "Always keep at least this many of the most recently updated eligible tags/versions, regardless of age"
+    required: false
+    default: "5"
+  dry_run:
+    description: "Log what would be deleted without deleting anything"
+    required: false
+    default: "false"
+  dockerhub_username:
+    description: "Required when registry=dockerhub"
+    required: false
+    default: ""
+  dockerhub_token:
+    description: "Required when registry=dockerhub. Needs Read, Write, Delete scope — Read & Write is NOT enough to delete tags."
+    required: false
+    default: ""
+  github_token:
+    description: "Required when registry=ghcr. Needs packages:write."
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Clean Docker Hub tags
+      if: inputs.registry == 'dockerhub'
+      shell: bash
+      env:
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token }}
+      run: |
+        bash "${{ github.action_path }}/cleanup-dockerhub.sh" \
+          "${{ inputs.image_name }}" "${{ inputs.ephemeral_tag_prefix }}" \
+          "${{ inputs.retention_days }}" "${{ inputs.keep_min }}" "${{ inputs.dry_run }}"
+
+    - name: Clean GHCR versions
+      if: inputs.registry == 'ghcr'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        bash "${{ github.action_path }}/cleanup-ghcr.sh" \
+          "${{ inputs.ghcr_image_name }}" "${{ inputs.ephemeral_tag_prefix }}" \
+          "${{ inputs.retention_days }}" "${{ inputs.keep_min }}" "${{ inputs.dry_run }}"

@@ -13,6 +13,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── trunk-ci-cd.yml         # Continuous build + dev/pre deploy for trunk-based repos
 │   ├── docker-release.yml      # Version bump + Docker build & publish (or promote, for trunk-based repos)
 │   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
+│   ├── image-cleanup.yml       # Delete old ephemeral image tags (dockerhub + ghcr)
 │   ├── codeql.yml              # CodeQL security analysis (init + analyze)
 │   ├── pr-labeler.yml          # Auto-label PRs by changed files
 │   ├── coolify-deploy.yml      # Trigger a Coolify deploy via its API
@@ -21,7 +22,8 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
 │   ├── install/                # Install dependencies with pnpm
 │   ├── trivy-scan/             # Scan a local image, report always, block optionally
-│   └── release-train-detect/   # Compute the exact next version from git tags
+│   ├── release-train-detect/   # Compute the exact next version from git tags
+│   └── image-tag-cleanup/      # Decide + delete ephemeral tags older than a retention window
 └── tests/                      # Test suites for the scripts in this repo
 ```
 
@@ -494,6 +496,58 @@ manifest list (`linux/amd64,linux/arm64`), not a single-platform digest.
 This has not yet been validated against a real multi-arch image — confirm
 it works before relying on `bump_mode: promote` for an actual production
 release.
+
+### Image Tag Cleanup
+
+`trunk-ci-cd.yml` publishes a new, uniquely-tagged image (`:sha-<shortsha>`)
+on **every** merge to `main` — with no branch-per-channel model to bound how
+many accumulate, that tag count only ever goes up. `image-cleanup.yml`
+deletes the old ones on a schedule you own, on both Docker Hub and GHCR.
+
+**Safety guarantee, not a suggestion:** an image is only ever a deletion
+*candidate* when **every** tag it carries starts with `ephemeral_tag_prefix`
+(default `sha-`). A stable release (`:X.Y.Z`), `:latest`, `:edge`, and every
+legacy release-train tag (`:alpha`, `:beta`, `:X.Y.Z-alpha.N`, ...) never
+match that prefix, so they are **never even considered** — this holds
+regardless of `retention_days`/`keep_min`, and is covered by
+`tests/image-tag-cleanup-select.test.sh`. Among the tags that *do* match,
+the `keep_min` most recently published are always kept regardless of age;
+the rest are deleted once older than `retention_days`.
+
+**Usage (consumer repository)** — this workflow owns no schedule itself, so
+the consumer's `on:` trigger decides the cadence:
+
+```yaml
+name: Image Tag Cleanup
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
+  workflow_dispatch: # lets you trigger it manually too
+
+jobs:
+  cleanup:
+    uses: sisques-labs/workflows/.github/workflows/image-cleanup.yml@main
+    with:
+      image_name: sisqueslabs/my-app
+      ghcr_image_name: ghcr.io/sisques-labs/my-app
+      push_ghcr: true
+      # dry_run: true   # uncomment to validate on a new repo before trusting it
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+**⚠️ Token permissions:** exactly like the Docker Hub description sync
+above, `DOCKERHUB_TOKEN` needs **`Read, Write, Delete`** scope — a token
+scoped only for `docker login` + push (`Read & Write`) can authenticate but
+every delete call will fail with `401`/`403`. GHCR cleanup uses the
+workflow's own `github.token` (needs `packages: write`, already declared at
+the workflow level) — no extra secret required.
+
+**First run on any repo:** pass `dry_run: true` once to see what the
+selection logic *would* delete (logged, nothing touched), then remove it
+once you've confirmed the output looks right.
 
 ### Branch sync after a stable release
 

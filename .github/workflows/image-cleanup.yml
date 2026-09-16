@@ -1,0 +1,92 @@
+name: Image Tag Cleanup
+
+# Deletes old ephemeral (commit-tagged) image tags — the ones trunk-ci-cd.yml
+# publishes on every merge to main (:sha-<shortsha>) — so they don't
+# accumulate forever in the registry. Never touches anything that doesn't
+# match ephemeral_tag_prefix: stable releases (:X.Y.Z, :latest), :edge, and
+# legacy release-train tags (:alpha, :beta, :X.Y.Z-alpha.N, ...) are always
+# safe regardless of the prefix a given repo uses.
+# See openspec/changes/trunk-based-ci-cd/design.md.
+#
+# This workflow only runs when called — the consumer repo owns the
+# schedule (see README "Image Tag Cleanup" usage example).
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: "Docker Hub image name (e.g. sisqueslabs/beacon-api)"
+        required: true
+        type: string
+      ghcr_image_name:
+        description: "GHCR image name (e.g. ghcr.io/sisques-labs/beacon-api). Required when push_ghcr=true."
+        required: false
+        type: string
+        default: ""
+      push_ghcr:
+        description: "Also clean up GHCR (mirrors the flag used to publish there)"
+        required: false
+        type: boolean
+        default: false
+      ephemeral_tag_prefix:
+        description: "Only tags starting with this prefix are ever eligible for deletion"
+        required: false
+        type: string
+        default: "sha-"
+      retention_days:
+        description: "Delete eligible tags older than this many days"
+        required: false
+        type: number
+        default: 14
+      keep_min:
+        description: "Always keep at least this many of the most recent eligible tags, regardless of age"
+        required: false
+        type: number
+        default: 5
+      dry_run:
+        description: "Log what would be deleted without deleting anything — use this to validate on a new repo before trusting it"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        description: "Needs Read, Write, Delete scope — Read & Write is NOT enough to delete tags"
+        required: true
+
+permissions:
+  packages: write
+
+jobs:
+  dockerhub:
+    name: Clean Docker Hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean
+        uses: sisques-labs/workflows/.github/actions/image-tag-cleanup@main
+        with:
+          registry: dockerhub
+          image_name: ${{ inputs.image_name }}
+          ephemeral_tag_prefix: ${{ inputs.ephemeral_tag_prefix }}
+          retention_days: ${{ inputs.retention_days }}
+          keep_min: ${{ inputs.keep_min }}
+          dry_run: ${{ inputs.dry_run }}
+          dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  ghcr:
+    name: Clean GHCR
+    if: inputs.push_ghcr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean
+        uses: sisques-labs/workflows/.github/actions/image-tag-cleanup@main
+        with:
+          registry: ghcr
+          ghcr_image_name: ${{ inputs.ghcr_image_name }}
+          ephemeral_tag_prefix: ${{ inputs.ephemeral_tag_prefix }}
+          retention_days: ${{ inputs.retention_days }}
+          keep_min: ${{ inputs.keep_min }}
+          dry_run: ${{ inputs.dry_run }}
+          github_token: ${{ github.token }}
