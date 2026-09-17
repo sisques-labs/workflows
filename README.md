@@ -409,6 +409,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # only exercised when scan_image: true below, but required unconditionally
+  # — see the security-events comment in docker-release.yml for why.
+  security-events: write
 
 jobs:
   pipeline:
@@ -418,10 +421,24 @@ jobs:
       ghcr_image_name: ghcr.io/sisques-labs/my-app
       push_ghcr: true
       node_version: "22"
+      scan_image: true
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
 ```
+
+**Vulnerability scanning:** `scan_image: true` scans the just-published
+`:sha-<shortsha>` tag by registry reference (no separate local build — Trivy
+pulls it) and uploads a report-only SARIF to Security > Code scanning, same
+as `docker-release.yml`'s scan. This is the **only** place a CVE published
+against an already-merged dependency gets caught in the trunk-based
+pipeline: `docker-release.yml`'s `promote` mode never rebuilds, so it never
+scans either. Blocking on CRITICAL still happens earlier, at PR time
+(`docker-smoke-build.yml`).
 
 **`deploy-dev`/`deploy-pre` are placeholders.** No consuming repo has real
 `dev`/`pre` infrastructure provisioned yet, so both jobs currently only log

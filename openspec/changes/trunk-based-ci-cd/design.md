@@ -90,6 +90,14 @@ New reusable workflow `image-cleanup.yml` + composite action `image-tag-cleanup`
 - **Generic across registries and repos.** The same selection logic runs against Docker Hub (per-tag) and GHCR (per-package-version, which can carry multiple tags — a version is skipped entirely if any of its tags is non-ephemeral). `ephemeral_tag_prefix` is configurable per consumer, so a repo using a different continuous-build tag scheme isn't hardcoded to `sha-`.
 - **`dry_run` is the required first step on any new repo** — logs what would be deleted without touching the registry.
 
+### D10 — Continuous builds need their own vulnerability scan (regression, caught during the nestjs-template migration)
+
+`trunk-ci-cd.yml` originally shipped with **no scanning at all**, and `docker-release.yml`'s `promote` mode explicitly skips its own scan with a comment claiming the digest "was already scanned when it was originally built, e.g. by trunk-ci-cd.yml" — a claim that was false at the time it was written. Net effect: under the old `release-train.yml` model, every push to `develop`/`staging`/`main` re-scanned via `docker-release.yml`; under the new model, a CVE published against an already-merged dependency was caught by **nothing** post-merge — only the PR-time blocking scan (`docker-smoke-build.yml`) still ran.
+
+Fixed: `trunk-ci-cd.yml` gains a `scan_image` input (default `false`, matching `docker-release.yml`'s own convention). When enabled, it scans the just-pushed `:sha-<shortsha>` tag **by registry reference** — no separate local single-arch build like `docker-release.yml` does, since the image is already pushed by that point in this workflow; Trivy pulls it itself. Report-only, same as everywhere else in this design; blocking still happens exclusively at PR time.
+
+**Why this only surfaced now:** nothing in this design's own review process caught it — every reviewer (including the one who wrote it) reasoned about the promote-mode skip in isolation and accepted the "already scanned upstream" comment at face value instead of verifying it against `trunk-ci-cd.yml`'s actual steps. Caught only when a human asked "when does the vulnerability scan happen now?" during a routine migration of a third repo, i.e. by someone re-deriving the full picture from scratch rather than trusting the existing comment.
+
 ## Risks / Trade-offs
 
 - **[Risk] Multi-arch digest promotion is unproven** → Validate `imagetools create` against a real multi-platform image before beacon-api's pilot relies on it for an actual prod release.
