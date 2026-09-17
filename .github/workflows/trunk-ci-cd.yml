@@ -57,6 +57,11 @@ on:
         required: false
         type: string
         default: "linux/amd64,linux/arm64"
+      scan_image:
+        description: "Scan the just-published image with Trivy and upload a full-severity SARIF report to Security > Code scanning. Report-only — never fails this job. Blocking on CRITICAL vulnerabilities happens earlier, at PR time (see docker-smoke-build.yml); this catches a CVE published against an already-merged dependency, which nothing else in the trunk-based pipeline would otherwise detect (docker-release.yml's promote mode never rebuilds, so it never scans either)."
+        required: false
+        type: boolean
+        default: false
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -76,6 +81,13 @@ on:
 permissions:
   contents: read
   packages: write
+  # security-events: write is only EXERCISED when scan_image=true, but
+  # GitHub validates every caller's granted permissions against this
+  # workflow's top-level declaration statically, not against which steps
+  # actually run — so every caller must declare it unconditionally, even
+  # one that never sets scan_image: true. See docker-release.yml's own
+  # comment on this same trap (it bit beacon-api's release.yml for real).
+  security-events: write
 
 jobs:
   build-and-publish:
@@ -191,6 +203,19 @@ jobs:
           IMAGE_NAME: ${{ inputs.image_name }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: echo "ref=${IMAGE_NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Scans the image that was just pushed, by registry reference — unlike
+      # docker-release.yml's PR/legacy-mode scan, there's no separate local
+      # build here: Trivy pulls the sha-<shortsha> tag itself. Report-only,
+      # same as there; a promote-mode release never re-scans (it never
+      # rebuilds), so this is the only place a CVE published against an
+      # already-merged dependency gets caught in the trunk-based pipeline.
+      - name: Scan image for vulnerabilities
+        if: inputs.scan_image
+        uses: sisques-labs/workflows/.github/actions/trivy-scan@main
+        with:
+          image_ref: ${{ inputs.image_name }}:sha-${{ steps.sha.outputs.short }}
+          block_on_critical: "false"
 
   # Placeholder: no consuming repo has real dev infrastructure provisioned yet
   # (see openspec/changes/trunk-based-ci-cd/design.md, D4). This job fixes the

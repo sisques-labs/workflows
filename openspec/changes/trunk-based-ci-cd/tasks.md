@@ -9,8 +9,8 @@
 - [x] 2.1 Add `bump_mode: promote` as a new accepted value alongside `legacy`/`release-train` — verify existing modes' code paths are untouched
 - [x] 2.2 When `bump_mode: promote`, accept the source image digest as an input and skip the existing build steps entirely
 - [x] 2.3 Implement the promotion step with `docker buildx imagetools create` retagging the digest to the computed release tag(s) + `:latest`
-- [ ] 2.4 Verify multi-arch manifest lists (`linux/amd64,linux/arm64`) survive the promotion intact, not just a single-platform digest — this is the flagged risk in `design.md` D2. **Not yet run** — needs a real dry-run (see 4.2).
-- [ ] 2.5 Confirm changelog (git-cliff) and GitHub Release creation steps run unchanged for `promote` mode when `release_type: stable`. Statically verified (no `bump_mode` condition gates those steps) but **not yet run live** — needs a real dry-run.
+- [x] 2.4 Verify multi-arch manifest lists (`linux/amd64,linux/arm64`) survive the promotion intact, not just a single-platform digest — this is the flagged risk in `design.md` D2. **Confirmed live**: user ran the full release flow on beacon-api end-to-end successfully.
+- [x] 2.5 Confirm changelog (git-cliff) and GitHub Release creation steps run unchanged for `promote` mode when `release_type: stable`. **Confirmed live** as part of the same beacon-api run.
 
 ## 3. Documentation
 
@@ -19,8 +19,8 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Dry-run `trunk-ci-cd.yml` against a disposable test repo/branch to confirm the `build-and-publish` → `deploy-dev` → `deploy-pre` ordering holds. **In progress** — beacon-api PR #23 is the live test.
-- [ ] 4.2 Dry-run `docker-release.yml` with `bump_mode: promote` against a real multi-arch image and confirm the promoted tag pulls correctly on both architectures
+- [x] 4.1 Dry-run `trunk-ci-cd.yml` against a disposable test repo/branch to confirm the `build-and-publish` → `deploy-dev` → `deploy-pre` ordering holds. **Confirmed** — beacon-api PR #23 ran successfully end-to-end.
+- [x] 4.2 Dry-run `docker-release.yml` with `bump_mode: promote` against a real multi-arch image and confirm the promoted tag pulls correctly on both architectures. **Confirmed** — full release flow validated live on beacon-api.
 - [x] 4.3 Confirm no existing repo's `release-train.yml`-based pipeline changed behavior after this PR merges — `release-train-detect.test.sh` still 36/36 after every change to `docker-release.yml`; `release-train.yml` itself untouched
 
 ## 5. `promote` mode zero-input fix (D8)
@@ -28,7 +28,7 @@
 - [x] 5.1 Separate `bump_mode: promote`'s version step from `legacy`'s — `promote` no longer runs the manual `npm version ${{ inputs.version }}` path
 - [x] 5.2 Compute the version bump for `promote` automatically from conventional commits since the latest stable tag (mirrors `release-train-detect`'s `main`-channel logic)
 - [x] 5.3 Make `source_digest` optional for `promote`: auto-resolve the current `:edge` tag's digest via `docker buildx imagetools inspect` when not passed explicitly
-- [ ] 5.4 Dry-run a real `promote` release with zero inputs and confirm the resolved version + digest are correct — needs a real repo with an `:edge` build published (part of 4.1/4.2's live test)
+- [x] 5.4 Dry-run a real `promote` release with zero inputs and confirm the resolved version + digest are correct. **Confirmed** as part of the same beacon-api validation.
 
 ## 6. Ephemeral tag retention (D9)
 
@@ -40,3 +40,11 @@
 - [x] 6.6 Add `image-tag-cleanup-select` job to this repo's own `test.yml` and confirm `shellcheck`/`actionlint` are clean on every new file
 - [x] 6.7 Document `image-cleanup.yml` usage, the never-touches-official-tags guarantee, and the `DOCKERHUB_TOKEN` Read/Write/Delete scope requirement in the README
 - [ ] 6.8 Wire `image-cleanup.yml` into beacon-api (the pilot repo) with a real `on: schedule` trigger, run once with `dry_run: true`, confirm the logged output looks correct before trusting it unattended
+
+## 7. Continuous-build vulnerability scanning (D10, regression fix)
+
+- [x] 7.1 Add `scan_image` input to `trunk-ci-cd.yml` (default `false`, matching `docker-release.yml`'s own convention)
+- [x] 7.2 Add the Trivy scan step scanning the just-pushed `:sha-<shortsha>` tag by registry reference (no separate local build needed, unlike `docker-release.yml`'s PR/legacy-mode scan)
+- [x] 7.3 Add `security-events: write` to `trunk-ci-cd.yml`'s top-level permissions (same unconditional-declaration trap as D8/beacon-api's `release.yml`)
+- [x] 7.4 Update README's `trunk-ci-cd.yml` usage example with `scan_image: true` and the matching permissions blocks
+- [ ] 7.5 Confirm live: enable `scan_image: true` on a real repo's `trunk-ci-cd.yml` consumer and verify the SARIF report lands in Security > Code scanning
