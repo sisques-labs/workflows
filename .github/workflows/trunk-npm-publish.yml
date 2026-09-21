@@ -1,0 +1,133 @@
+name: Trunk npm Publish
+
+# See openspec/changes/trunk-based-npm-packages/design.md for the full design.
+#
+# One reusable workflow for trunk-based npm packages, dispatched on the
+# CALLER's event (inside a workflow_call workflow the `github` context is the
+# caller's, so no `mode` input is needed):
+#
+#   - pull_request        -> `validate` job: install, typecheck, test, build and
+#                            a `pnpm pack --dry-run`. Nothing is ever published
+#                            from a PR.
+#   - push to main        -> `publish` job (added in a later slice): semantic-
+#                            release computes the version, then the package is
+#                            published to npmjs and GitHub Packages. No commit
+#                            is ever written back to main, so package.json
+#                            stays at 0.0.0 in git.
+#
+# Because GitHub validates a caller's permissions statically against the
+# declaration below (not against which job actually runs), PR-only callers
+# must still grant all three permissions the publish path needs.
+#
+# NOTE: the `outputs:` block (published, version, edge_version) is added
+# together with the `publish` job, because a workflow_call output has to
+# reference an existing job. On PR calls those outputs will be empty strings.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "24"
+      pnpm_version:
+        description: "pnpm version to use (leave empty to auto-detect from package.json)"
+        required: false
+        type: string
+        default: ""
+      app_path:
+        description: 'Path to the package (e.g. packages/lib). Use "." for the repository root. Must be relative and must not contain "..".'
+        required: false
+        type: string
+        default: "."
+      use_filter:
+        description: "Install only the app_path workspace and its dependencies (pnpm --filter)"
+        required: false
+        type: boolean
+        default: false
+      npm_version:
+        description: "Exact npm CLI version installed for the publish call (provenance needs npm >= 9.5.0). Used by the publish path only."
+        required: false
+        type: string
+        default: "11.6.2"
+      semantic_release_version:
+        description: "Exact semantic-release version used to compute the release. Used by the publish path only."
+        required: false
+        type: string
+        default: "25.0.2"
+      semantic_release_exec_version:
+        description: "Exact @semantic-release/exec version used to run the publish. Used by the publish path only."
+        required: false
+        type: string
+        default: "7.1.0"
+      publish_github_packages:
+        description: "Also publish to GitHub Packages. When false only npmjs is published (explicit opt-out). Used by the publish path only."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      NPM_TOKEN:
+        description: "npmjs automation token used to publish. Required on the publish path only; PR validation never reads it."
+        required: false
+
+# Static and unconditional on purpose (same convention as trunk-ci-cd.yml):
+#   contents: write   -> semantic-release pushes the release tag and creates the
+#                        GitHub Release (publish path). Never used to push a
+#                        commit to main.
+#   packages: write   -> publish to GitHub Packages (publish path).
+#   id-token: write   -> npm provenance attestation via OIDC (publish path).
+# issues/pull-requests are deliberately absent: the publish path disables
+# semantic-release's success/fail comments.
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+# Runs of the same ref queue instead of overlapping, and are NEVER cancelled:
+# cancelling a publish mid-flight is exactly what leaves a git tag without a
+# package on the registry.
+concurrency:
+  group: trunk-npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # PR path only. Proves the package installs, type-checks, passes its tests,
+  # builds and packs, so a broken package is caught before it can reach main.
+  validate:
+    name: Validate (pull request)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # package_json_file points pnpm/action-setup at the package's own
+      # package.json so the pnpm version is detected from app_path in a monorepo.
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+          pnpm_version: ${{ inputs.pnpm_version }}
+          package_json_file: ${{ inputs.app_path }}/package.json
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+
+      - name: Typecheck
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm typecheck
+
+      - name: Test
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm test
+
+      - name: Build
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm build
+
+      # Dry run: lists the tarball contents and fails on a malformed package
+      # manifest, without writing a tarball or touching any registry.
+      - name: Pack (dry run)
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm pack --dry-run
