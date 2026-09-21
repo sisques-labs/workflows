@@ -83,10 +83,10 @@ test_case "command inputs are env-passed script names, skippable when empty"
 for k in typecheck test build; do
   assert_contains "${k}_command declared" "$WORKFLOW" "      ${k}_command:"
   assert_eq "${k}_command default" "1" "$(awk -v k="      ${k}_command:" '$0==k {i=1} i && /default:/ {print (index($0, "\"" "'${k}'" "\"")>0); exit}' "$WORKFLOW")"
-  assert_eq "${k}: skip-when-empty in both jobs" "2" "$(rg -c "^        if: \\$\\{\\{ inputs\\.${k}_command != '' \\}\\}$" "$WORKFLOW")"
-  assert_eq "${k}: env-passed in both jobs" "2" "$(rg -c "^          SCRIPT: \\$\\{\\{ inputs\\.${k}_command \\}\\}$" "$WORKFLOW")"
+  assert_eq "${k}: skip-when-empty in both jobs" "2" "$(grep -Ec "^        if: \\$\\{\\{ inputs\\.${k}_command != '' \\}\\}$" "$WORKFLOW")"
+  assert_eq "${k}: env-passed in both jobs" "2" "$(grep -Ec "^          SCRIPT: \\$\\{\\{ inputs\\.${k}_command \\}\\}$" "$WORKFLOW")"
 done
-assert_eq "pnpm run quoted in 6 steps" "6" "$(rg -c '^        run: pnpm run "\$SCRIPT"$' "$WORKFLOW")"
+assert_eq "pnpm run quoted in 6 steps" "6" "$(grep -Ec '^        run: pnpm run "\$SCRIPT"$' "$WORKFLOW")"
 assert_absent "no hardcoded pnpm typecheck/test/build" "$WORKFLOW" 'run: pnpm (typecheck|test|build)$'
 assert_absent "commands never inlined in run:" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.(typecheck|test|build)_command'
 
