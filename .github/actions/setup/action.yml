@@ -10,12 +10,22 @@ inputs:
     description: "pnpm version to use (leave empty to auto-detect from package.json)"
     required: false
     default: ""
+  package_json_file:
+    description: "Path to the package.json used by pnpm/action-setup to detect the pnpm version (leave empty for the action default, package.json)"
+    required: false
+    default: ""
+  fetch_depth:
+    description: "Number of commits to fetch on checkout (0 = full history)"
+    required: false
+    default: "1"
 
 runs:
   using: "composite"
   steps:
     - name: Checkout repository
       uses: actions/checkout@v7.0.1
+      with:
+        fetch-depth: ${{ inputs.fetch_depth }}
 
     # pnpm must be installed and on PATH *before* actions/setup-node when
     # using cache: pnpm below — setup-node shells out to `pnpm store path`
@@ -26,10 +36,13 @@ runs:
       uses: pnpm/action-setup@v6
       with:
         version: ${{ inputs.pnpm_version }}
+        package_json_file: ${{ inputs.package_json_file || 'package.json' }}
 
     - name: Install pnpm (auto-detect)
       if: inputs.pnpm_version == ''
       uses: pnpm/action-setup@v6
+      with:
+        package_json_file: ${{ inputs.package_json_file || 'package.json' }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v7.0.0
