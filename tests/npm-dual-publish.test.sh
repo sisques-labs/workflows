@@ -79,6 +79,18 @@ assert_eq "both guards identical" "$(guard_script 1)" "$(guard_script 2)"
 assert_absent "app_path never inlined in a run: script" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.app_path'
 assert_eq "guard reads APP_PATH from env" "2" "$(grep -Ec '^          APP_PATH: \$\{\{ inputs\.app_path \}\}$' "$WORKFLOW")"
 
+test_case "command inputs are env-passed script names, skippable when empty"
+for k in typecheck test build; do
+  assert_contains "${k}_command declared" "$WORKFLOW" "      ${k}_command:"
+  assert_eq "${k}_command default" "1" "$(awk -v k="      ${k}_command:" '$0==k {i=1} i && /default:/ {print (index($0, "\"" "'${k}'" "\"")>0); exit}' "$WORKFLOW")"
+  assert_eq "${k}: skip-when-empty in both jobs" "2" "$(grep -Ec "^        if: \\$\\{\\{ inputs\\.${k}_command != '' \\}\\}$" "$WORKFLOW")"
+  assert_eq "${k}: env-passed in both jobs" "2" "$(grep -Ec "^          SCRIPT: \\$\\{\\{ inputs\\.${k}_command \\}\\}$" "$WORKFLOW")"
+done
+# shellcheck disable=SC2016 # literal $SCRIPT is the pattern, not an expansion
+assert_eq "pnpm run quoted in 6 steps" "6" "$(grep -Ec '^        run: pnpm run "\$SCRIPT"$' "$WORKFLOW")"
+assert_absent "no hardcoded pnpm typecheck/test/build" "$WORKFLOW" 'run: pnpm (typecheck|test|build)$'
+assert_absent "commands never inlined in run:" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.(typecheck|test|build)_command'
+
 test_case "app_path guard rejects the same paths as resolve_app_path"
 GUARD="$(guard_script 1)"
 for p in "" "/etc" "../x" "packages/../.." "." "packages/lib" "packages/a..b"; do

@@ -553,10 +553,13 @@ jobs:
 ```
 
 **Inputs:** `node_version` (`"24"`), `pnpm_version` (auto-detect),
-`app_path` (`"."`, relative, no `..`), `use_filter` (`false`), `npm_version`
+`app_path` (`"."`, relative, no `..`), `use_filter` (`false`), `typecheck_command` (`"typecheck"`),
+`test_command` (`"test"`), `build_command` (`"build"`), `npm_version`
 (`"11.6.2"`), `semantic_release_version` (`"25.0.2"`),
 `semantic_release_exec_version` (`"7.1.0"`), `publish_github_packages`
-(`true`; `false` publishes to npmjs only).
+(`true`; `false` publishes to npmjs only). The three `*_command` inputs are
+pnpm script names run with `pnpm run`; an empty value skips the step (e.g.
+`typecheck_command: ""` for a package without a typecheck script).
 
 **Secrets:** `NPM_TOKEN` (npmjs automation token). Optional at the workflow
 level; required on the `main` path only, PR validation never reads it.
@@ -569,7 +572,9 @@ All are empty on PR calls, because the `publish` job is skipped.
 - Package name must be `@<owner>/<pkg>` (owner = the repository owner) to
   publish to GitHub Packages; otherwise set `publish_github_packages: false`.
 - The repository must be public for npm provenance.
-- `pnpm typecheck`, `pnpm test` and `pnpm build` must exist in `app_path`.
+- The scripts named by `typecheck_command`, `test_command` and `build_command`
+  (defaults `typecheck`, `test`, `build`) must exist in `app_path`, or be skipped
+  with an empty value.
 
 **Behavior:**
 

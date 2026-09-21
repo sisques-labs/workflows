@@ -15,6 +15,11 @@ name: Trunk npm Publish
 #                            is ever written back to main, so package.json
 #                            stays at 0.0.0 in git.
 #
+# typecheck_command / test_command / build_command are pnpm SCRIPT NAMES (not
+# full commands), passed through env and run as `pnpm run "$SCRIPT"`, never
+# interpolated into run:. An empty value skips that step, so a package without
+# a typecheck script sets `typecheck_command: ""`.
+#
 # Because GitHub validates a caller's permissions statically against the
 # declaration below (not against which job actually runs), PR-only callers
 # must still grant all three permissions the publish path needs.
@@ -40,6 +45,21 @@ on:
         required: false
         type: string
         default: "."
+      typecheck_command:
+        description: 'pnpm script name run as the typecheck step (pnpm run <name>). Empty skips the step; pass "" explicitly for packages without a typecheck script.'
+        required: false
+        type: string
+        default: "typecheck"
+      test_command:
+        description: "pnpm script name run as the test step (pnpm run <name>). Empty skips the step."
+        required: false
+        type: string
+        default: "test"
+      build_command:
+        description: "pnpm script name run as the build step (pnpm run <name>). Empty skips the step."
+        required: false
+        type: string
+        default: "build"
       use_filter:
         description: "Install only the app_path workspace and its dependencies (pnpm --filter)"
         required: false
@@ -139,16 +159,25 @@ jobs:
           use_filter: ${{ inputs.use_filter }}
 
       - name: Typecheck
+        if: ${{ inputs.typecheck_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm typecheck
+        env:
+          SCRIPT: ${{ inputs.typecheck_command }}
+        run: pnpm run "$SCRIPT"
 
       - name: Test
+        if: ${{ inputs.test_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm test
+        env:
+          SCRIPT: ${{ inputs.test_command }}
+        run: pnpm run "$SCRIPT"
 
       - name: Build
+        if: ${{ inputs.build_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm build
+        env:
+          SCRIPT: ${{ inputs.build_command }}
+        run: pnpm run "$SCRIPT"
 
       # Dry run: lists the tarball contents and fails on a malformed package
       # manifest, without writing a tarball or touching any registry.
@@ -195,16 +224,25 @@ jobs:
           use_filter: ${{ inputs.use_filter }}
 
       - name: Typecheck
+        if: ${{ inputs.typecheck_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm typecheck
+        env:
+          SCRIPT: ${{ inputs.typecheck_command }}
+        run: pnpm run "$SCRIPT"
 
       - name: Test
+        if: ${{ inputs.test_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm test
+        env:
+          SCRIPT: ${{ inputs.test_command }}
+        run: pnpm run "$SCRIPT"
 
       - name: Build
+        if: ${{ inputs.build_command != '' }}
         working-directory: ${{ inputs.app_path }}
-        run: pnpm build
+        env:
+          SCRIPT: ${{ inputs.build_command }}
+        run: pnpm run "$SCRIPT"
 
       - name: Release and publish
         id: publish
