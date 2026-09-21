@@ -11,6 +11,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── node-release.yml        # Node.js release workflow with semantic-release
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── trunk-ci-cd.yml         # Continuous build + dev/pre deploy for trunk-based repos
+│   ├── trunk-npm-publish.yml   # Trunk-based npm package: PR validation + semantic-release dual publish
 │   ├── docker-release.yml      # Version bump + Docker build & publish (or promote, for trunk-based repos)
 │   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
 │   ├── image-cleanup.yml       # Delete old ephemeral image tags (dockerhub + ghcr)
@@ -20,6 +21,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   └── test.yml                # CI for this repository (detect tests + shellcheck)
 ├── actions/                    # Composite actions
 │   ├── setup/                  # Common setup (Node.js, pnpm, checkout)
+│   ├── npm-dual-publish/       # semantic-release (tag only) + publish to npmjs and GitHub Packages
 │   ├── install/                # Install dependencies with pnpm
 │   ├── trivy-scan/             # Scan a local image, report always, block optionally
 │   ├── release-train-detect/   # Compute the exact next version from git tags
@@ -513,6 +515,78 @@ manifest list (`linux/amd64,linux/arm64`), not a single-platform digest.
 This has not yet been validated against a real multi-arch image — confirm
 it works before relying on `bump_mode: promote` for an actual production
 release.
+
+### Trunk npm Publish
+
+For npm packages on trunk-based development, `trunk-npm-publish.yml` runs on
+the **caller's** event, so no `mode` input exists.
+
+| Caller event     | Job        | What it does                                                        |
+| ---------------- | ---------- | ------------------------------------------------------------------- |
+| `pull_request`   | `validate` | install, typecheck, test, build, `pnpm pack --dry-run`; never publishes |
+| push to `main`   | `publish`  | same checks, then semantic-release + publish to npmjs and GitHub Packages |
+
+**Usage (consumer repository):**
+
+```yaml
+name: Package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Required even for PR-only callers: GitHub validates the caller's permissions
+# statically against the reusable workflow's declaration.
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  package:
+    uses: sisques-labs/workflows/.github/workflows/trunk-npm-publish.yml@main
+    with:
+      app_path: packages/lib # default "."
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+**Inputs:** `node_version` (`"24"`), `pnpm_version` (auto-detect),
+`app_path` (`"."`, relative, no `..`), `use_filter` (`false`), `npm_version`
+(`"11.6.2"`), `semantic_release_version` (`"25.0.2"`),
+`semantic_release_exec_version` (`"7.1.0"`), `publish_github_packages`
+(`true`; `false` publishes to npmjs only).
+
+**Secrets:** `NPM_TOKEN` (npmjs automation token). Optional at the workflow
+level; required on the `main` path only, PR validation never reads it.
+
+**Outputs:** `published` (`true`/`false`), `version` (stable), `edge_version`.
+All are empty on PR calls, because the `publish` job is skipped.
+
+**Requirements:**
+
+- Package name must be `@<owner>/<pkg>` (owner = the repository owner) to
+  publish to GitHub Packages; otherwise set `publish_github_packages: false`.
+- The repository must be public for npm provenance.
+- `pnpm typecheck`, `pnpm test` and `pnpm build` must exist in `app_path`.
+
+**Behavior:**
+
+- `package.json` stays at `0.0.0` in git; versions come from git tags.
+  Nothing is committed back to `main`. The version is set only in the runner.
+- Each release publishes stable (`latest`) and `x.y.z-edge.N` (`edge`). Order:
+  stable to npmjs, stable to GitHub Packages, then edge to both. A version
+  already on a registry is skipped, so a re-run publishes only what is missing.
+- No releasable commits means no release: `published=false`, nothing published.
+- semantic-release tags before publishing. If a publish fails after the tag,
+  delete the stray tag before re-running.
+- `workspace:` dependencies are not rewritten (only `version` and
+  `publishConfig.registry` are), so use pnpm-compatible ranges for anything
+  that must resolve from the registry.
+- Runs of the same ref queue and are never cancelled.
+- `npm_version` and `semantic_release_*` pins are provisional and bumped
+  manually.
 
 ### Image Tag Cleanup
 
