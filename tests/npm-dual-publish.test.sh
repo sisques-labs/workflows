@@ -11,6 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ACTION_DIR="${REPO_ROOT}/.github/actions/npm-dual-publish"
 LIB="${ACTION_DIR}/lib.sh"
 PUBLISH="${ACTION_DIR}/publish.sh"
+PREPARE="${ACTION_DIR}/prepare.sh"
 ACTION="${ACTION_DIR}/action.yml"
 
 # shellcheck source=/dev/null
@@ -102,10 +103,59 @@ for p in "" "/etc" "../x" "packages/../.." "." "packages/lib" "packages/a..b"; d
 done
 
 # --- Threat matrix: commit state -------------------------------------------
-test_case "no commit-back to main"
-assert_absent "no @semantic-release/git plugin" "$ACTION" '@semantic-release/git([^a-zA-Z-]|$)'
+test_case "no commit-back to main unless commit_release_files"
+# The git plugin may only be added inside the commit_release_files branch.
+assert_eq "git plugin listed once (opt-in branch only)" "1" "$(grep -Ec '^          plugins\+=\(.*@semantic-release/git( |\))' "$ACTION")"
+assert_contains "default list has no git plugin" "$ACTION" '          plugins+=(@semantic-release/exec @semantic-release/github)'
+assert_absent "plugins never listed inline on the CLI" "$ACTION" '^ *--plugins .*@semantic-release/'
 assert_absent "no git commit in publish.sh" "$PUBLISH" 'git[[:space:]]+(commit|add)'
+assert_absent "no git commit in prepare.sh" "$PREPARE" 'git[[:space:]]+(commit|add|push)'
 assert_absent "no git commit in action.yml" "$ACTION" 'git[[:space:]]+(commit|add)'
+assert_contains "commit-back is opt-in, default false" "$ACTION" '    default: "false"'
+assert_contains "commit message skips CI" "$ACTION" '[skip ci]'
+assert_absent "assets never set (would leak to GitHub plugin)" "$ACTION" '^ *--assets'
+
+test_case "commit-back plugin order: changelog, exec (prepare), git, github"
+assert_contains "order" "$ACTION" 'plugins+=(@semantic-release/changelog @semantic-release/exec @semantic-release/git @semantic-release/github)'
+
+test_case "release_token only feeds semantic-release, never GitHub Packages"
+# shellcheck disable=SC2016 # literal ${{ }} expression is the pattern
+assert_contains "GHP token stays github_token" "$ACTION" 'GHP_TOKEN: ${{ inputs.github_token }}'
+assert_contains "publish.sh reads GHP_TOKEN" "$PUBLISH" 'GHP_TOKEN'
+
+test_case "require_root_app_path_for_commit"
+assert_ok "commit off, subdir" require_root_app_path_for_commit "packages/lib" "false"
+assert_ok "commit on, root" require_root_app_path_for_commit "." "true"
+assert_fails "commit on, subdir" require_root_app_path_for_commit "packages/lib" "true"
+
+test_case "bump_manifest_version preserves formatting"
+TMP_DIR="$(mktemp -d)"
+printf '{\n  "name": "@x/y",\n  "version": "0.0.0",\n  "files": ["dist"],\n  "engines": {\n    "version": "1"\n  }\n}\n' >"${TMP_DIR}/a.json"
+bump_manifest_version "${TMP_DIR}/a.json" "1.2.3"
+assert_eq "2-space: top-level version only" '{
+  "name": "@x/y",
+  "version": "1.2.3",
+  "files": ["dist"],
+  "engines": {
+    "version": "1"
+  }
+}' "$(cat "${TMP_DIR}/a.json")"
+printf '{\n\t"version": "0.0.0",\n\t"dependencies": {\n\t\t"version": "9"\n\t}\n}\n' >"${TMP_DIR}/b.json"
+bump_manifest_version "${TMP_DIR}/b.json" "0.4.0"
+assert_eq "tab-indented, nested version untouched" "0.4.0/9" "$(jq -r '.version + "/" + .dependencies.version' "${TMP_DIR}/b.json")"
+assert_contains "tab indent kept" "${TMP_DIR}/b.json" $'\t"version": "0.4.0"'
+printf '{"name":"x","version":"0.0.0"}' >"${TMP_DIR}/c.json"
+bump_manifest_version "${TMP_DIR}/c.json" "2.0.0"
+assert_eq "compact JSON falls back to jq" "2.0.0" "$(jq -r .version "${TMP_DIR}/c.json")"
+printf '{\n  "version": "1.0.0", "x": 1\n}\n' >"${TMP_DIR}/d.json"
+bump_manifest_version "${TMP_DIR}/d.json" "1.0.1"
+assert_eq "suffix after version kept" "1.0.1/1" "$(jq -r '.version + "/" + (.x|tostring)' "${TMP_DIR}/d.json")"
+assert_fails "prerelease rejected" bump_manifest_version "${TMP_DIR}/a.json" "1.0.0-edge.1"
+# shellcheck disable=SC2016 # literal metacharacters are the point
+assert_fails "metachar version rejected" bump_manifest_version "${TMP_DIR}/a.json" '1.0.0"$(touch /tmp/x)'
+assert_fails "missing file" bump_manifest_version "${TMP_DIR}/nope.json" "1.0.0"
+assert_eq "no tmp left behind" "" "$(fd -H 'tmp$' "$TMP_DIR" 2>/dev/null || true)"
+rm -rf "$TMP_DIR"
 
 # --- Threat matrix: push state ---------------------------------------------
 test_case "tag push only, branch pinned to main"

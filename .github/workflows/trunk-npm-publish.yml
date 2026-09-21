@@ -11,9 +11,12 @@ name: Trunk npm Publish
 #                            from a PR.
 #   - push to main        -> `publish` job : semantic-
 #                            release computes the version, then the package is
-#                            published to npmjs and GitHub Packages. No commit
-#                            is ever written back to main, so package.json
-#                            stays at 0.0.0 in git.
+#                            published to npmjs and GitHub Packages. By
+#                            default no commit is written back to main, so
+#                            package.json stays at 0.0.0 in git. With
+#                            commit_release_files: true the release ALSO
+#                            commits CHANGELOG.md and package.json to main
+#                            ("chore(release): X.Y.Z [skip ci]").
 #
 # typecheck_command / test_command / build_command are pnpm SCRIPT NAMES (not
 # full commands), passed through env and run as `pnpm run "$SCRIPT"`, never
@@ -85,6 +88,21 @@ on:
         required: false
         type: boolean
         default: true
+      commit_release_files:
+        description: 'Opt-in. On a stable release also generate CHANGELOG.md, set the version in package.json and commit both to main with "chore(release): X.Y.Z [skip ci]". Requires app_path ".", and a token allowed to push to main (see release_token / README). Used by the publish path only.'
+        required: false
+        type: boolean
+        default: false
+      semantic_release_changelog_version:
+        description: "Exact @semantic-release/changelog version. Used only when commit_release_files is true."
+        required: false
+        type: string
+        default: "7.0.0"
+      semantic_release_git_version:
+        description: "Exact @semantic-release/git version. Used only when commit_release_files is true."
+        required: false
+        type: string
+        default: "11.0.1"
     outputs:
       published:
         description: "true when a release was published, false when no releasable commits (empty on PR calls)"
@@ -99,11 +117,14 @@ on:
       NPM_TOKEN:
         description: "npmjs automation token used to publish. Required on the publish path only; PR validation never reads it."
         required: false
+      RELEASE_TOKEN:
+        description: "Optional PAT or app token used only by semantic-release to push the release commit and tag (needed when main is protected against github-actions). Falls back to the default GITHUB_TOKEN. Never used for GitHub Packages."
+        required: false
 
 # Static and unconditional on purpose (same convention as trunk-ci-cd.yml):
 #   contents: write   -> semantic-release pushes the release tag and creates the
-#                        GitHub Release (publish path). Never used to push a
-#                        commit to main.
+#                        GitHub Release (publish path), and the release commit
+#                        when commit_release_files is true.
 #   packages: write   -> publish to GitHub Packages (publish path).
 #   id-token: write   -> npm provenance attestation via OIDC (publish path).
 # issues/pull-requests are deliberately absent: the publish path disables
@@ -188,7 +209,8 @@ jobs:
   # Push-to-main path only. semantic-release computes the version from the
   # commit history (full clone so it sees every tag), then the composite action
   # publishes stable + edge to npmjs and GitHub Packages. Nothing is committed
-  # back to main: package.json stays at 0.0.0 in git.
+  # back to main unless commit_release_files is true; otherwise package.json
+  # stays at 0.0.0 in git.
   publish:
     name: Publish (main)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -216,6 +238,9 @@ jobs:
           pnpm_version: ${{ inputs.pnpm_version }}
           package_json_file: ${{ inputs.app_path }}/package.json
           fetch_depth: "0"
+          # A RELEASE_TOKEN must win over the checkout token when semantic-release
+          # pushes; the persisted checkout credential would otherwise override it.
+          persist_credentials: ${{ secrets.RELEASE_TOKEN == '' }}
 
       - name: Install dependencies
         uses: sisques-labs/workflows/.github/actions/install@main
@@ -253,5 +278,9 @@ jobs:
           semantic_release_version: ${{ inputs.semantic_release_version }}
           semantic_release_exec_version: ${{ inputs.semantic_release_exec_version }}
           publish_github_packages: ${{ inputs.publish_github_packages }}
+          commit_release_files: ${{ inputs.commit_release_files }}
+          semantic_release_changelog_version: ${{ inputs.semantic_release_changelog_version }}
+          semantic_release_git_version: ${{ inputs.semantic_release_git_version }}
+          release_token: ${{ secrets.RELEASE_TOKEN }}
           npm_token: ${{ secrets.NPM_TOKEN }}
           github_token: ${{ github.token }}

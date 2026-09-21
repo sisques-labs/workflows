@@ -9,7 +9,7 @@ set -euo pipefail
 # A version already on a registry is logged and skipped, so a re-run only
 # publishes what is missing.
 #
-# Env: RUNNER_TEMP, NPM_TOKEN, GITHUB_TOKEN, RUN_NUMBER, APP_PATH,
+# Env: RUNNER_TEMP, NPM_TOKEN, GHP_TOKEN (falls back to GITHUB_TOKEN), RUN_NUMBER, APP_PATH,
 #      PUBLISH_GITHUB_PACKAGES (true|false), GITHUB_REPOSITORY_OWNER,
 #      GITHUB_OUTPUT (optional).
 
@@ -30,7 +30,7 @@ NPMJS_RC="${RUNNER_TEMP:?RUNNER_TEMP required}/npmjs.npmrc"
 GHP_RC="${RUNNER_TEMP}/ghp.npmrc"
 umask 077
 printf '//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN:?NPM_TOKEN required}" >"$NPMJS_RC"
-printf '//npm.pkg.github.com/:_authToken=%s\n' "${GITHUB_TOKEN:?GITHUB_TOKEN required}" >"$GHP_RC"
+printf '//npm.pkg.github.com/:_authToken=%s\n' "${GHP_TOKEN:-${GITHUB_TOKEN:?GHP_TOKEN or GITHUB_TOKEN required}}" >"$GHP_RC"
 
 # Rewrites package.json in the runner only (never committed): sets the
 # version and forces publishConfig.registry so a consumer's own

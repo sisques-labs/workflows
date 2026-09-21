@@ -18,6 +18,10 @@ inputs:
     description: "Number of commits to fetch on checkout (0 = full history)"
     required: false
     default: "1"
+  persist_credentials:
+    description: "Leave the checkout token in the git config (actions/checkout persist-credentials). Set to false when a later step pushes with its own token, otherwise the persisted token wins."
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -26,6 +30,7 @@ runs:
       uses: actions/checkout@v7.0.1
       with:
         fetch-depth: ${{ inputs.fetch_depth }}
+        persist-credentials: ${{ inputs.persist_credentials == 'true' }}
 
     # pnpm must be installed and on PATH *before* actions/setup-node when
     # using cache: pnpm below — setup-node shells out to `pnpm store path`
