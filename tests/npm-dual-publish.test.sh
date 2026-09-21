@@ -86,6 +86,7 @@ for k in typecheck test build; do
   assert_eq "${k}: skip-when-empty in both jobs" "2" "$(grep -Ec "^        if: \\$\\{\\{ inputs\\.${k}_command != '' \\}\\}$" "$WORKFLOW")"
   assert_eq "${k}: env-passed in both jobs" "2" "$(grep -Ec "^          SCRIPT: \\$\\{\\{ inputs\\.${k}_command \\}\\}$" "$WORKFLOW")"
 done
+# shellcheck disable=SC2016 # literal $SCRIPT is the pattern, not an expansion
 assert_eq "pnpm run quoted in 6 steps" "6" "$(grep -Ec '^        run: pnpm run "\$SCRIPT"$' "$WORKFLOW")"
 assert_absent "no hardcoded pnpm typecheck/test/build" "$WORKFLOW" 'run: pnpm (typecheck|test|build)$'
 assert_absent "commands never inlined in run:" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.(typecheck|test|build)_command'
