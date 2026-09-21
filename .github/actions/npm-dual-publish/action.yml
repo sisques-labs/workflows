@@ -1,5 +1,5 @@
 name: npm dual publish
-description: Compute the next version with semantic-release (tag push only, no commit-back) and publish stable + edge to npmjs (with provenance) and GitHub Packages.
+description: Compute the next version with semantic-release (tag push only, no commit-back unless commit_release_files) and publish stable + edge to npmjs (with provenance) and GitHub Packages.
 
 inputs:
   app_path:
@@ -19,6 +19,22 @@ inputs:
     description: "Also publish to GitHub Packages (false = npmjs only, explicit opt-out)"
     required: false
     default: "true"
+  commit_release_files:
+    description: "On a stable release also update CHANGELOG.md and package.json and commit them back to main ([skip ci]). Requires app_path \".\". Default false: nothing is committed."
+    required: false
+    default: "false"
+  semantic_release_changelog_version:
+    description: "Exact @semantic-release/changelog version (used only when commit_release_files is true)"
+    required: false
+    default: "7.0.0"
+  semantic_release_git_version:
+    description: "Exact @semantic-release/git version (used only when commit_release_files is true)"
+    required: false
+    default: "11.0.1"
+  release_token:
+    description: "Optional token (PAT or app token) semantic-release uses to push the release commit and tag, e.g. when main is protected. Falls back to github_token. Never used for GitHub Packages."
+    required: false
+    default: ""
   npm_token:
     description: "npmjs automation token"
     required: true
@@ -49,10 +65,15 @@ runs:
         NPM_TOKEN: ${{ inputs.npm_token }}
         PUBLISH_GHP: ${{ inputs.publish_github_packages }}
         REPO_OWNER: ${{ github.repository_owner }}
+        COMMIT_RELEASE_FILES: ${{ inputs.commit_release_files }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         source "${ACTION_PATH}/lib.sh"
         app_path="$(resolve_app_path "$APP_PATH")"
+        require_root_app_path_for_commit "$app_path" "$COMMIT_RELEASE_FILES" || {
+          echo "::error::commit_release_files requires app_path \".\""
+          exit 1
+        }
         if [ -z "$NPM_TOKEN" ]; then
           echo "::error::NPM_TOKEN secret is required to publish"
           exit 1
@@ -74,16 +95,29 @@ runs:
         [ "$(npm --version)" = "$NPM_VERSION" ] || { echo "::error::npm version mismatch"; exit 1; }
 
     # The full plugin list is on the CLI so a consumer .releaserc cannot add
-    # @semantic-release/npm or /git. Only a tag and a GitHub Release are
-    # written; success/fail comments are off so no issues/PR permissions are
-    # needed. publishCmd runs publish.sh with the computed version.
+    # @semantic-release/npm or /git. By default only a tag and a GitHub Release
+    # are written; success/fail comments are off so no issues/PR permissions
+    # are needed. publishCmd runs publish.sh with the computed version.
+    #
+    # commit_release_files=true adds @semantic-release/changelog and /git,
+    # in this order: changelog (prepare) -> exec prepareCmd bumps package.json
+    # -> git plugin commits CHANGELOG.md + package.json (its default assets)
+    # and pushes to main -> tag -> exec publishCmd -> github. The commit therefore
+    # happens BEFORE the publish; see README for the failed-publish caveat.
+    # Plugin options are root-level CLI flags (semantic-release has no
+    # per-plugin CLI syntax); `assets` is deliberately NOT set because the
+    # GitHub plugin would read it as release assets.
     - name: Release
       id: release
       shell: bash
       env:
         APP_PATH: ${{ inputs.app_path }}
         NPM_TOKEN: ${{ inputs.npm_token }}
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_TOKEN: ${{ inputs.release_token != '' && inputs.release_token || inputs.github_token }}
+        GHP_TOKEN: ${{ inputs.github_token }}
+        COMMIT_RELEASE_FILES: ${{ inputs.commit_release_files }}
+        SR_CHANGELOG_VERSION: ${{ inputs.semantic_release_changelog_version }}
+        SR_GIT_VERSION: ${{ inputs.semantic_release_git_version }}
         PUBLISH_GITHUB_PACKAGES: ${{ inputs.publish_github_packages }}
         RUN_NUMBER: ${{ github.run_number }}
         ACTION_PATH: ${{ github.action_path }}
@@ -91,14 +125,24 @@ runs:
         SR_EXEC_VERSION: ${{ inputs.semantic_release_exec_version }}
       run: |
         echo "published=false" >>"$GITHUB_OUTPUT"
+        packages=(-p "semantic-release@${SR_VERSION}" -p "@semantic-release/exec@${SR_EXEC_VERSION}")
+        plugins=(@semantic-release/commit-analyzer @semantic-release/release-notes-generator)
+        opts=(--publish-cmd 'bash "$ACTION_PATH/publish.sh" "${nextRelease.version}"')
+        if [ "$COMMIT_RELEASE_FILES" = "true" ]; then
+          packages+=(-p "@semantic-release/changelog@${SR_CHANGELOG_VERSION}" -p "@semantic-release/git@${SR_GIT_VERSION}")
+          plugins+=(@semantic-release/changelog @semantic-release/exec @semantic-release/git @semantic-release/github)
+          opts+=(
+            --prepare-cmd 'bash "$ACTION_PATH/prepare.sh" "${nextRelease.version}"'
+            --message $'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
+          )
+        else
+          plugins+=(@semantic-release/exec @semantic-release/github)
+        fi
         cmd=(
-          npx -y
-          -p "semantic-release@${SR_VERSION}"
-          -p "@semantic-release/exec@${SR_EXEC_VERSION}"
-          semantic-release
+          npx -y "${packages[@]}" semantic-release
           --branches main
-          --plugins @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/github
-          --publish-cmd 'bash "$ACTION_PATH/publish.sh" "${nextRelease.version}"'
+          --plugins "${plugins[@]}"
+          "${opts[@]}"
           --no-success-comment
           --no-fail-comment
         )

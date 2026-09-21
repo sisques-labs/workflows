@@ -77,3 +77,64 @@ classify_publish_failure() {
       ;;
   esac
 }
+
+# require_root_app_path_for_commit <app_path> <commit_release_files>
+# Commit-back uses the @semantic-release/git default assets (CHANGELOG.md and
+# package.json at the repository root). Those cannot be scoped to a
+# subdirectory from the CLI without also feeding them to the GitHub plugin as
+# release assets, so commit-back is only allowed when app_path is ".".
+require_root_app_path_for_commit() {
+  local path="${1-}" commit="${2-}"
+  if [ "$commit" = "true" ] && [ "$path" != "." ]; then
+    echo "commit_release_files requires app_path \".\", got '${path}'" >&2
+    return 1
+  fi
+}
+
+# bump_manifest_version <package.json> <stable-version>
+# Sets the top-level "version" in place. Formatting is preserved by replacing
+# only that line (matched at the file's own indentation, so nested "version"
+# keys are never touched); compact JSON falls back to a jq rewrite. The result
+# is always verified with jq. Never evals its input.
+bump_manifest_version() {
+  local file="${1-}" version="${2-}" line lead="" out="" done="false" re tmp
+  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "version must be X.Y.Z, got '${version}'" >&2
+    return 1
+  fi
+  if [ ! -f "$file" ]; then
+    echo "manifest not found: '${file}'" >&2
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      [[:space:]]*)
+        lead="${line%%[![:space:]]*}"
+        break
+        ;;
+    esac
+  done <"$file"
+  tmp="${file}.tmp"
+  if [ -n "$lead" ]; then
+    re="^${lead}\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"(.*)\$"
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [ "$done" = "false" ] && [[ "$line" =~ $re ]]; then
+        out+="${lead}\"version\": \"${version}\"${BASH_REMATCH[1]}"$'\n'
+        done="true"
+      else
+        out+="${line}"$'\n'
+      fi
+    done <"$file"
+  fi
+  if [ "$done" = "true" ]; then
+    printf '%s' "$out" >"$tmp"
+  else
+    jq --arg v "$version" '.version = $v' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  if [ "$(jq -r '.version' "$tmp")" != "$version" ]; then
+    rm -f "$tmp"
+    echo "failed to set version in '${file}'" >&2
+    return 1
+  fi
+  mv "$tmp" "$file"
+}
