@@ -23,7 +23,7 @@ On `pull_request`, the workflow MUST run install, typecheck, test, build, and `p
 
 ### Requirement: Trunk publish path
 
-On `push` to `main`, the workflow MUST run semantic-release with a workflow-supplied config (commit-analyzer, release-notes-generator, github) and MUST NOT use `@semantic-release/git` or commit anything back. Version MUST come from git tags; `package.json` MUST stay `0.0.0` in git and be rewritten only in the runner before publish.
+On `push` to `main`, the workflow MUST run semantic-release with a workflow-supplied config (commit-analyzer, release-notes-generator, github). Unless `commit_release_files` is `true`, it MUST NOT use `@semantic-release/git` or commit anything back. Version MUST come from git tags; unless `commit_release_files` is `true`, `package.json` MUST stay `0.0.0` in git and be rewritten only in the runner before publish.
 
 #### Scenario: Releasable commit on main
 - GIVEN a `feat:` commit merges to `main`
@@ -32,7 +32,7 @@ On `push` to `main`, the workflow MUST run semantic-release with a workflow-supp
 - AND the runner's `package.json` carries the computed version at publish time
 
 #### Scenario: No commit-back
-- GIVEN any successful publish run
+- GIVEN any successful publish run with `commit_release_files` false (default)
 - WHEN it completes
 - THEN `main` has no new commit and git `package.json` still reads `0.0.0`
 
@@ -40,6 +40,21 @@ On `push` to `main`, the workflow MUST run semantic-release with a workflow-supp
 - GIVEN only `chore:` commits since the last tag
 - WHEN the publish path runs
 - THEN no version is published and the job succeeds with `published` = `false`
+
+### Requirement: Optional release commit
+
+When `commit_release_files` is `true` (default `false`), a stable release MUST also update `CHANGELOG.md` and the `package.json` version and commit both to `main` with `chore(release): <version> [skip ci]`, using a workflow-fixed plugin list (changelog, exec, git after commit-analyzer/notes; github last). The workflow MUST fail before publishing when `app_path` is not `.`. The optional `RELEASE_TOKEN` secret, when set, is used only for the semantic-release push and never for GitHub Packages.
+
+#### Scenario: Release commit on main
+- GIVEN `commit_release_files` is true and a `feat:` commit merges to `main`
+- WHEN the publish path succeeds
+- THEN `main` gains one `chore(release): X.Y.Z [skip ci]` commit with `CHANGELOG.md` and `package.json` at `X.Y.Z`
+- AND the release commit does not trigger another publish run
+
+#### Scenario: Subdirectory package rejected
+- GIVEN `commit_release_files` is true and `app_path` is `packages/lib`
+- WHEN the release step starts
+- THEN the job fails before any registry publish
 
 ### Requirement: Stable and edge dist-tags
 

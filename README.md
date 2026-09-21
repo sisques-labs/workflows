@@ -557,12 +557,18 @@ jobs:
 `test_command` (`"test"`), `build_command` (`"build"`), `npm_version`
 (`"11.6.2"`), `semantic_release_version` (`"25.0.2"`),
 `semantic_release_exec_version` (`"7.1.0"`), `publish_github_packages`
-(`true`; `false` publishes to npmjs only). The three `*_command` inputs are
+(`true`; `false` publishes to npmjs only), `commit_release_files` (`false`,
+see [Committing release files](#committing-release-files-opt-in)),
+`semantic_release_changelog_version` (`"7.0.0"`) and
+`semantic_release_git_version` (`"11.0.1"`) (both used only when
+`commit_release_files` is `true`). The three `*_command` inputs are
 pnpm script names run with `pnpm run`; an empty value skips the step (e.g.
 `typecheck_command: ""` for a package without a typecheck script).
 
 **Secrets:** `NPM_TOKEN` (npmjs automation token). Optional at the workflow
 level; required on the `main` path only, PR validation never reads it.
+`RELEASE_TOKEN` (optional PAT or app token, only for `commit_release_files`
+on a protected `main`; see below).
 
 **Outputs:** `published` (`true`/`false`), `version` (stable), `edge_version`.
 All are empty on PR calls, because the `publish` job is skipped.
@@ -578,8 +584,9 @@ All are empty on PR calls, because the `publish` job is skipped.
 
 **Behavior:**
 
-- `package.json` stays at `0.0.0` in git; versions come from git tags.
-  Nothing is committed back to `main`. The version is set only in the runner.
+- By default `package.json` stays at `0.0.0` in git; versions come from git
+  tags. Nothing is committed back to `main`. The version is set only in the
+  runner. (`commit_release_files: true` changes this, see below.)
 - Each release publishes stable (`latest`) and `x.y.z-edge.N` (`edge`). Order:
   stable to npmjs, stable to GitHub Packages, then edge to both. A version
   already on a registry is skipped, so a re-run publishes only what is missing.
@@ -592,6 +599,47 @@ All are empty on PR calls, because the `publish` job is skipped.
 - Runs of the same ref queue and are never cancelled.
 - `npm_version` and `semantic_release_*` pins are provisional and bumped
   manually.
+
+#### Committing release files (opt-in)
+
+`commit_release_files: true` makes a stable release also write `CHANGELOG.md`
+(`@semantic-release/changelog`), set `version` in `package.json`, and commit
+both to `main` with `chore(release): X.Y.Z [skip ci]` plus the release notes
+(`@semantic-release/git`). Default `false`: nothing changes for existing
+callers. The plugin list is still fixed by the workflow, so a consumer
+`.releaserc` cannot add plugins.
+
+```yaml
+    with:
+      commit_release_files: true
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }} # only if main is protected
+```
+
+- **Branch protection.** The push runs as `github-actions` with the default
+  `GITHUB_TOKEN` (`contents: write`), which only works if `main` allows it
+  (no pull-request or status-check requirement it cannot meet, or it is on the
+  bypass list). Otherwise pass `RELEASE_TOKEN`: a PAT or GitHub App token that
+  can push to `main` (bypass actor). It is used only by semantic-release;
+  GitHub Packages always uses the default token. Never invent one: if
+  `RELEASE_TOKEN` is not set, the default token is used.
+- **No loop.** The commit carries `[skip ci]`, and a push made with the
+  default `GITHUB_TOKEN` does not trigger workflows anyway. Runs still queue
+  without cancelling.
+- **`app_path` must be `"."`.** `CHANGELOG.md` and `package.json` are committed
+  from the repository root; the job fails before any publish otherwise.
+  Releases are also repo-wide tags (`vX.Y.Z`), so multi-package monorepos are
+  not supported by this workflow.
+- **Order.** The version in `package.json` is written before the commit and the
+  tarball; `publish.sh` still sets the stable and `x.y.z-edge.N` versions per
+  publish in the runner, so the edge and dual-registry logic is unchanged.
+- **Failed publish caveat.** semantic-release commits and tags *before*
+  publishing. If a publish fails, `main` already has the release commit and
+  the tag but the package is missing. Do not revert the commit: re-run the job
+  (already-published versions are skipped) or publish manually.
+- Requires `node_version` >= 22.22 (`@semantic-release/changelog` and `git`
+  engines).
 
 ### Image Tag Cleanup
 
