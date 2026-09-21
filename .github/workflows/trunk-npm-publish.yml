@@ -9,7 +9,7 @@ name: Trunk npm Publish
 #   - pull_request        -> `validate` job: install, typecheck, test, build and
 #                            a `pnpm pack --dry-run`. Nothing is ever published
 #                            from a PR.
-#   - push to main        -> `publish` job (added in a later slice): semantic-
+#   - push to main        -> `publish` job : semantic-
 #                            release computes the version, then the package is
 #                            published to npmjs and GitHub Packages. No commit
 #                            is ever written back to main, so package.json
@@ -19,9 +19,8 @@ name: Trunk npm Publish
 # declaration below (not against which job actually runs), PR-only callers
 # must still grant all three permissions the publish path needs.
 #
-# NOTE: the `outputs:` block (published, version, edge_version) is added
-# together with the `publish` job, because a workflow_call output has to
-# reference an existing job. On PR calls those outputs will be empty strings.
+# Outputs (published, version, edge_version) come from the `publish` job and
+# are empty strings on PR calls, because that job is skipped there.
 
 on:
   workflow_call:
@@ -66,6 +65,16 @@ on:
         required: false
         type: boolean
         default: true
+    outputs:
+      published:
+        description: "true when a release was published, false when no releasable commits (empty on PR calls)"
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        description: "Stable version published (empty when nothing was released or on PR calls)"
+        value: ${{ jobs.publish.outputs.version }}
+      edge_version:
+        description: "Edge version published (empty when nothing was released or on PR calls)"
+        value: ${{ jobs.publish.outputs.edge_version }}
     secrets:
       NPM_TOKEN:
         description: "npmjs automation token used to publish. Required on the publish path only; PR validation never reads it."
@@ -131,3 +140,54 @@ jobs:
       - name: Pack (dry run)
         working-directory: ${{ inputs.app_path }}
         run: pnpm pack --dry-run
+
+  # Push-to-main path only. semantic-release computes the version from the
+  # commit history (full clone so it sees every tag), then the composite action
+  # publishes stable + edge to npmjs and GitHub Packages. Nothing is committed
+  # back to main: package.json stays at 0.0.0 in git.
+  publish:
+    name: Publish (main)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      version: ${{ steps.publish.outputs.version }}
+      edge_version: ${{ steps.publish.outputs.edge_version }}
+    steps:
+      - name: Setup
+        uses: sisques-labs/workflows/.github/actions/setup@main
+        with:
+          node_version: ${{ inputs.node_version }}
+          pnpm_version: ${{ inputs.pnpm_version }}
+          package_json_file: ${{ inputs.app_path }}/package.json
+          fetch_depth: "0"
+
+      - name: Install dependencies
+        uses: sisques-labs/workflows/.github/actions/install@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          use_filter: ${{ inputs.use_filter }}
+
+      - name: Typecheck
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm typecheck
+
+      - name: Test
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm test
+
+      - name: Build
+        working-directory: ${{ inputs.app_path }}
+        run: pnpm build
+
+      - name: Release and publish
+        id: publish
+        uses: sisques-labs/workflows/.github/actions/npm-dual-publish@main
+        with:
+          app_path: ${{ inputs.app_path }}
+          npm_version: ${{ inputs.npm_version }}
+          semantic_release_version: ${{ inputs.semantic_release_version }}
+          semantic_release_exec_version: ${{ inputs.semantic_release_exec_version }}
+          publish_github_packages: ${{ inputs.publish_github_packages }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ github.token }}
