@@ -61,6 +61,34 @@ assert_eq "dot" "." "$(resolve_app_path ".")"
 assert_eq "packages/lib" "packages/lib" "$(resolve_app_path "packages/lib")"
 assert_eq "dotted name is not traversal" "packages/a..b" "$(resolve_app_path "packages/a..b")"
 
+# --- W3: app_path guard runs before setup/install --------------------------
+WORKFLOW="${REPO_ROOT}/.github/workflows/trunk-npm-publish.yml"
+# Prints the run script of the Nth "Validate app_path" step (1 = validate job).
+guard_script() {
+  awk -v n="$1" '/- name: Validate app_path/ {c++} c==n && /run: \|/ {f=1; next}
+    f && /^$/ {exit} f {sub(/^          /, ""); print}' "$WORKFLOW"
+}
+
+test_case "app_path guard is the first step of validate and publish"
+for job in validate publish; do
+  first_step="$(awk -v j="  ${job}:" '$0==j {i=1} i && /^      - name:/ {print; exit}' "$WORKFLOW")"
+  assert_eq "${job}: first step" "      - name: Validate app_path" "$first_step"
+done
+assert_eq "guard step count" "2" "$(grep -Ec '^      - name: Validate app_path' "$WORKFLOW")"
+assert_eq "both guards identical" "$(guard_script 1)" "$(guard_script 2)"
+assert_absent "app_path never inlined in a run: script" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.app_path'
+assert_eq "guard reads APP_PATH from env" "2" "$(grep -Ec '^          APP_PATH: \$\{\{ inputs\.app_path \}\}$' "$WORKFLOW")"
+
+test_case "app_path guard rejects the same paths as resolve_app_path"
+GUARD="$(guard_script 1)"
+for p in "" "/etc" "../x" "packages/../.." "." "packages/lib" "packages/a..b"; do
+  guard_rc=0
+  APP_PATH="$p" bash -c "$GUARD" >/dev/null 2>&1 || guard_rc=$?
+  lib_rc=0
+  resolve_app_path "$p" >/dev/null 2>&1 || lib_rc=$?
+  assert_eq "guard parity for '${p}'" "$lib_rc" "$guard_rc"
+done
+
 # --- Threat matrix: commit state -------------------------------------------
 test_case "no commit-back to main"
 assert_absent "no @semantic-release/git plugin" "$ACTION" '@semantic-release/git([^a-zA-Z-]|$)'

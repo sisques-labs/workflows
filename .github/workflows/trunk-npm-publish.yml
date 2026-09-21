@@ -108,6 +108,21 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # Runs before anything consumes app_path (setup, install, working-directory).
+      # Same rule as resolve_app_path in npm-dual-publish/lib.sh (kept in sync by
+      # tests/npm-dual-publish.test.sh). The repo is not checked out yet, so the
+      # check is inline and app_path is passed through env, never interpolated.
+      - name: Validate app_path
+        env:
+          APP_PATH: ${{ inputs.app_path }}
+        run: |
+          case "$APP_PATH" in
+            "" | /*) echo "app_path must be a non-empty relative path" >&2; exit 1 ;;
+          esac
+          case "/${APP_PATH}/" in
+            */../*) echo "app_path must not contain '..'" >&2; exit 1 ;;
+          esac
+
       # package_json_file points pnpm/action-setup at the package's own
       # package.json so the pnpm version is detected from app_path in a monorepo.
       - name: Setup
@@ -154,6 +169,17 @@ jobs:
       version: ${{ steps.publish.outputs.version }}
       edge_version: ${{ steps.publish.outputs.edge_version }}
     steps:
+      - name: Validate app_path
+        env:
+          APP_PATH: ${{ inputs.app_path }}
+        run: |
+          case "$APP_PATH" in
+            "" | /*) echo "app_path must be a non-empty relative path" >&2; exit 1 ;;
+          esac
+          case "/${APP_PATH}/" in
+            */../*) echo "app_path must not contain '..'" >&2; exit 1 ;;
+          esac
+
       - name: Setup
         uses: sisques-labs/workflows/.github/actions/setup@main
         with:
