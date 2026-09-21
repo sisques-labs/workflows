@@ -74,10 +74,10 @@ for job in validate publish; do
   first_step="$(awk -v j="  ${job}:" '$0==j {i=1} i && /^      - name:/ {print; exit}' "$WORKFLOW")"
   assert_eq "${job}: first step" "      - name: Validate app_path" "$first_step"
 done
-assert_eq "guard step count" "2" "$(rg -c '^      - name: Validate app_path' "$WORKFLOW")"
+assert_eq "guard step count" "2" "$(grep -Ec '^      - name: Validate app_path' "$WORKFLOW")"
 assert_eq "both guards identical" "$(guard_script 1)" "$(guard_script 2)"
 assert_absent "app_path never inlined in a run: script" "$WORKFLOW" 'run:.*\$\{\{ *inputs\.app_path'
-assert_eq "guard reads APP_PATH from env" "2" "$(rg -c '^          APP_PATH: \$\{\{ inputs\.app_path \}\}$' "$WORKFLOW")"
+assert_eq "guard reads APP_PATH from env" "2" "$(grep -Ec '^          APP_PATH: \$\{\{ inputs\.app_path \}\}$' "$WORKFLOW")"
 
 test_case "app_path guard rejects the same paths as resolve_app_path"
 GUARD="$(guard_script 1)"
