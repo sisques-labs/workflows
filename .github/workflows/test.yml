@@ -30,6 +30,16 @@ jobs:
       - name: Run tests
         run: bash tests/image-tag-cleanup-select.test.sh
 
+  npm-dual-publish:
+    name: npm dual publish tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Run tests
+        run: bash tests/npm-dual-publish.test.sh
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest

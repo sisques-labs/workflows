@@ -1,0 +1,105 @@
+name: npm dual publish
+description: Compute the next version with semantic-release (tag push only, no commit-back) and publish stable + edge to npmjs (with provenance) and GitHub Packages.
+
+inputs:
+  app_path:
+    description: "Path to the package, relative to the repository root. Must not contain '..'."
+    required: false
+    default: "."
+  npm_version:
+    description: "Exact npm CLI version to install for publishing (provenance needs >= 9.5.0)"
+    required: true
+  semantic_release_version:
+    description: "Exact semantic-release version"
+    required: true
+  semantic_release_exec_version:
+    description: "Exact @semantic-release/exec version"
+    required: true
+  publish_github_packages:
+    description: "Also publish to GitHub Packages (false = npmjs only, explicit opt-out)"
+    required: false
+    default: "true"
+  npm_token:
+    description: "npmjs automation token"
+    required: true
+  github_token:
+    description: "GitHub token (tag push, GitHub Release, GitHub Packages)"
+    required: true
+
+outputs:
+  published:
+    description: "true when a release was published, false when nothing was releasable"
+    value: ${{ steps.release.outputs.published }}
+  version:
+    description: "Stable version published (empty when nothing was released)"
+    value: ${{ steps.release.outputs.version }}
+  edge_version:
+    description: "Edge version published (empty when nothing was released)"
+    value: ${{ steps.release.outputs.edge_version }}
+
+runs:
+  using: composite
+  steps:
+    # Fails before any registry call: bad app_path, missing NPM_TOKEN, or a
+    # package name GitHub Packages cannot map to this repository.
+    - name: Preflight
+      shell: bash
+      env:
+        APP_PATH: ${{ inputs.app_path }}
+        NPM_TOKEN: ${{ inputs.npm_token }}
+        PUBLISH_GHP: ${{ inputs.publish_github_packages }}
+        REPO_OWNER: ${{ github.repository_owner }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        source "${ACTION_PATH}/lib.sh"
+        app_path="$(resolve_app_path "$APP_PATH")"
+        if [ -z "$NPM_TOKEN" ]; then
+          echo "::error::NPM_TOKEN secret is required to publish"
+          exit 1
+        fi
+        if [ "$PUBLISH_GHP" = "true" ]; then
+          name="$(jq -r '.name // ""' "${app_path}/package.json")"
+          validate_scope "$name" "$REPO_OWNER" || {
+            echo "::error::package name must be @${REPO_OWNER}/<pkg> to publish to GitHub Packages (or set publish_github_packages: false)"
+            exit 1
+          }
+        fi
+
+    - name: Install pinned npm
+      shell: bash
+      env:
+        NPM_VERSION: ${{ inputs.npm_version }}
+      run: |
+        npm install -g "npm@${NPM_VERSION}"
+        [ "$(npm --version)" = "$NPM_VERSION" ] || { echo "::error::npm version mismatch"; exit 1; }
+
+    # The full plugin list is on the CLI so a consumer .releaserc cannot add
+    # @semantic-release/npm or /git. Only a tag and a GitHub Release are
+    # written; success/fail comments are off so no issues/PR permissions are
+    # needed. publishCmd runs publish.sh with the computed version.
+    - name: Release
+      id: release
+      shell: bash
+      env:
+        APP_PATH: ${{ inputs.app_path }}
+        NPM_TOKEN: ${{ inputs.npm_token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PUBLISH_GITHUB_PACKAGES: ${{ inputs.publish_github_packages }}
+        RUN_NUMBER: ${{ github.run_number }}
+        ACTION_PATH: ${{ github.action_path }}
+        SR_VERSION: ${{ inputs.semantic_release_version }}
+        SR_EXEC_VERSION: ${{ inputs.semantic_release_exec_version }}
+      run: |
+        echo "published=false" >>"$GITHUB_OUTPUT"
+        cmd=(
+          npx -y
+          -p "semantic-release@${SR_VERSION}"
+          -p "@semantic-release/exec@${SR_EXEC_VERSION}"
+          semantic-release
+          --branches main
+          --plugins @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/github
+          --publish-cmd 'bash "$ACTION_PATH/publish.sh" "${nextRelease.version}"'
+          --no-success-comment
+          --no-fail-comment
+        )
+        "${cmd[@]}"
