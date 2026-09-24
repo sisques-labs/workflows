@@ -12,6 +12,7 @@ This repository contains reusable GitHub Actions workflows and composite actions
 │   ├── release-train.yml       # Automatic alpha/beta/stable release train
 │   ├── trunk-ci-cd.yml         # Continuous build + dev/pre deploy for trunk-based repos
 │   ├── trunk-npm-publish.yml   # Trunk-based npm package: PR validation + semantic-release dual publish
+│   ├── trunk-maven-release.yml # Trunk-based Maven library: CI + semantic-release tag/GitHub Release (no publish)
 │   ├── docker-release.yml      # Version bump + Docker build & publish (or promote, for trunk-based repos)
 │   ├── docker-smoke-build.yml  # PR-time Dockerfile build + blocking vuln scan
 │   ├── image-cleanup.yml       # Delete old ephemeral image tags (dockerhub + ghcr)
@@ -640,6 +641,78 @@ callers. The plugin list is still fixed by the workflow, so a consumer
   (already-published versions are skipped) or publish manually.
 - Requires `node_version` >= 22.22 (`@semantic-release/changelog` and `git`
   engines).
+
+### Trunk Maven Release
+
+For Java/Maven libraries on trunk-based development, `trunk-maven-release.yml`
+runs on the **caller's** event, so no `mode` input exists. **Publishing is
+intentionally out of scope**: no Maven Central, no GitHub Packages, no `mvn
+deploy`, and the pom version is never rewritten with `versions:set`. This
+workflow only proves the build and records the release (git tag + GitHub
+Release); publishing can be added later as an opt-in.
+
+| Caller event   | Job       | What it does                                                        |
+| -------------- | --------- | -------------------------------------------------------------------- |
+| `pull_request` | `ci`      | setup Java, format check, test, build; never releases                |
+| push to `main` | `release` | same CI checks, then semantic-release creates a version + git tag + GitHub Release |
+
+**Usage (consumer repository):**
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  ci:
+    permissions:
+      contents: write
+    uses: sisques-labs/workflows/.github/workflows/trunk-maven-release.yml@main
+    secrets: inherit
+```
+
+**Inputs:** `java_version` (`"21"`), `java_distribution` (`"temurin"`),
+`app_path` (`"."`, relative, no `..`), `format_check_goal`
+(`"spotless:check"`), `test_goal` (`"test"`), `build_goal`
+(`"verify -DskipTests"` — `verify` so plugin checks bound to that phase still
+run, `-DskipTests` because the `test_goal` step already ran the tests),
+`semantic_release_version` (`"25.0.2"`), `semantic_release_exec_version`
+(`"7.1.0"`), `node_version` (`"24"`, used only by the `release` job to run
+semantic-release via `npx`). The three `*_goal` inputs are Maven goal
+strings, word-split and run as `$MVN -B -ntp $GOAL`; an empty value skips the
+step (e.g. `format_check_goal: ""` for a project without the Spotless
+plugin).
+
+**Secrets:** `RELEASE_TOKEN` (optional PAT or app token, only needed when
+`main` is protected against `github-actions` pushing/creating releases;
+falls back to the default `GITHUB_TOKEN`).
+
+**Outputs:** `released` (`true`/`false`), `version` (stable). Both are empty
+on PR calls, because the `release` job is skipped.
+
+**Requirements:**
+
+- `./mvnw` is used when present and executable in `app_path`; otherwise the
+  `mvn` preinstalled on `ubuntu-latest` is used.
+- The goals named by `format_check_goal`, `test_goal` and `build_goal`
+  (defaults `spotless:check`, `test`, `verify -DskipTests`) must exist/apply
+  in `app_path`, or be skipped with an empty value.
+
+**Behavior:**
+
+- No plugin, registry credential, or publish step is involved — this
+  workflow only computes the version (via `@semantic-release/commit-analyzer`
+  and `@semantic-release/release-notes-generator`) and writes the git tag +
+  GitHub Release (via `@semantic-release/github`). `@semantic-release/exec`
+  is included only to capture the `released`/`version` outputs into
+  `$GITHUB_OUTPUT` from semantic-release's `publish` step.
+- **First release on a repo with no tags will be `1.0.0`** (semantic-release's
+  own default) — the `pom.xml` version is never read or modified by this
+  workflow, in git or otherwise.
+- No releasable commits means no release: `released=false`, nothing tagged.
+- Runs of the same ref queue and are never cancelled.
+- `semantic_release_*` pins are provisional and bumped manually.
 
 ### Image Tag Cleanup
 
