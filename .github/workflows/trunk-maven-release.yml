@@ -1,0 +1,293 @@
+name: Trunk Maven Release
+
+# One reusable workflow for trunk-based Java/Maven libraries, dispatched on the
+# CALLER's event (inside a workflow_call workflow the `github` context is the
+# caller's, so no `mode` input is needed):
+#
+#   - pull_request  -> `ci` job     : setup Java, format check, test, build.
+#                                     Nothing is ever released from a PR.
+#   - push to main  -> `release` job: same CI steps, then semantic-release
+#                                     computes the version, creates a git tag
+#                                     and a GitHub Release from conventional
+#                                     commits.
+#
+# Publishing (Maven Central, GitHub Packages, `mvn deploy`, or rewriting the
+# pom version with `versions:set`) is intentionally OUT OF SCOPE for now. This
+# workflow only proves the build and records the release; it can grow an
+# opt-in publish path later without changing this behavior.
+#
+# format_check_goal / test_goal / build_goal are Maven GOALS (word-split on
+# purpose, e.g. "verify -DskipTests"), passed through env and run as
+# `$MVN -B -ntp $GOAL`, never interpolated into run:. An empty value skips
+# that step.
+#
+# Because GitHub validates a caller's permissions statically against the
+# declaration below (not against which job actually runs), PR-only callers
+# must still grant the permission the release path needs.
+#
+# Outputs (released, version) come from the `release` job and are empty
+# strings on PR calls, because that job is skipped there.
+
+on:
+  workflow_call:
+    inputs:
+      java_version:
+        description: "Java version to use (actions/setup-java java-version)"
+        required: false
+        type: string
+        default: "21"
+      java_distribution:
+        description: "JDK distribution to use (actions/setup-java distribution)"
+        required: false
+        type: string
+        default: "temurin"
+      app_path:
+        description: 'Path to the Maven project (e.g. libs/core). Use "." for the repository root. Must be relative and must not contain "..".'
+        required: false
+        type: string
+        default: "."
+      format_check_goal:
+        description: 'Maven goal(s) run as the format-check step (word-split, e.g. "spotless:check"). Empty skips the step.'
+        required: false
+        type: string
+        default: "spotless:check"
+      test_goal:
+        description: 'Maven goal(s) run as the test step (word-split, e.g. "test"). Empty skips the step.'
+        required: false
+        type: string
+        default: "test"
+      build_goal:
+        description: 'Maven goal(s) run as the build step (word-split, e.g. "verify -DskipTests"). Defaults to "verify" with tests skipped so plugin checks bound to the verify phase still run without re-running the already-passed test step. Empty skips the step.'
+        required: false
+        type: string
+        default: "verify -DskipTests"
+      semantic_release_version:
+        description: "Exact semantic-release version used to compute the release. Used by the release path only."
+        required: false
+        type: string
+        default: "25.0.2"
+      semantic_release_exec_version:
+        description: "Exact @semantic-release/exec version. Used by the release path only, to capture the released/version outputs into $GITHUB_OUTPUT from semantic-release's publish step (there is no @semantic-release/npm-equivalent plugin for a plain Maven repo to hook into)."
+        required: false
+        type: string
+        default: "7.1.0"
+      node_version:
+        description: "Node.js version used only in the release job to run semantic-release via npx."
+        required: false
+        type: string
+        default: "24"
+    outputs:
+      released:
+        description: "true when a release was published, false when no releasable commits (empty on PR calls)"
+        value: ${{ jobs.release.outputs.released }}
+      version:
+        description: "Stable version released (empty when nothing was released or on PR calls)"
+        value: ${{ jobs.release.outputs.version }}
+    secrets:
+      RELEASE_TOKEN:
+        description: "Optional PAT or app token used only by semantic-release to create the release tag and GitHub Release (needed when main is protected against github-actions). Falls back to the default GITHUB_TOKEN."
+        required: false
+
+# Static and unconditional on purpose (same convention as trunk-npm-publish.yml):
+#   contents: write -> semantic-release creates the git tag and the GitHub
+#                      Release (release path).
+# packages/id-token are deliberately absent: nothing is published to any
+# registry. issues/pull-requests are deliberately absent too: the release
+# path disables semantic-release's success/fail comments.
+permissions:
+  contents: write
+
+# Runs of the same ref queue instead of overlapping, and are NEVER cancelled:
+# cancelling a release mid-flight is exactly what leaves a partial tag/release.
+concurrency:
+  group: trunk-maven-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # PR path only. Proves the project format-checks, passes its tests and
+  # builds, so a broken change is caught before it can reach main.
+  ci:
+    name: CI (pull request)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Runs before anything consumes app_path (checkout, setup-java,
+      # working-directory). The repo is not checked out yet, so the check is
+      # inline and app_path is passed through env, never interpolated. Kept in
+      # sync with trunk-npm-publish.yml's identical guard.
+      - name: Validate app_path
+        env:
+          APP_PATH: ${{ inputs.app_path }}
+        run: |
+          case "$APP_PATH" in
+            "" | /*) echo "app_path must be a non-empty relative path" >&2; exit 1 ;;
+          esac
+          case "/${APP_PATH}/" in
+            */../*) echo "app_path must not contain '..'" >&2; exit 1 ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Java
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: ${{ inputs.java_distribution }}
+          java-version: ${{ inputs.java_version }}
+          cache: maven
+
+      # ./mvnw is preferred when present and executable so a project's pinned
+      # wrapper version wins; otherwise fall back to the mvn preinstalled on
+      # ubuntu-latest.
+      - name: Resolve Maven executable
+        id: resolve_mvn
+        working-directory: ${{ inputs.app_path }}
+        run: |
+          if [ -x "./mvnw" ]; then
+            echo "mvn=./mvnw" >>"$GITHUB_OUTPUT"
+          else
+            echo "mvn=mvn" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Format check
+        if: ${{ inputs.format_check_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.format_check_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+      - name: Test
+        if: ${{ inputs.test_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.test_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+      - name: Build
+        if: ${{ inputs.build_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.build_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+  # Push-to-main path only. Runs the same CI steps, then semantic-release
+  # computes the version from the commit history (full clone so it sees every
+  # tag) and creates a git tag + GitHub Release. No pom.xml is touched and
+  # nothing is published to any registry.
+  release:
+    name: Release (main)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Validate app_path
+        env:
+          APP_PATH: ${{ inputs.app_path }}
+        run: |
+          case "$APP_PATH" in
+            "" | /*) echo "app_path must be a non-empty relative path" >&2; exit 1 ;;
+          esac
+          case "/${APP_PATH}/" in
+            */../*) echo "app_path must not contain '..'" >&2; exit 1 ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          # A RELEASE_TOKEN must win over the checkout token when
+          # semantic-release/github mutates repository state; the persisted
+          # checkout credential would otherwise override it.
+          persist-credentials: ${{ secrets.RELEASE_TOKEN == '' }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: ${{ inputs.java_distribution }}
+          java-version: ${{ inputs.java_version }}
+          cache: maven
+
+      - name: Resolve Maven executable
+        id: resolve_mvn
+        working-directory: ${{ inputs.app_path }}
+        run: |
+          if [ -x "./mvnw" ]; then
+            echo "mvn=./mvnw" >>"$GITHUB_OUTPUT"
+          else
+            echo "mvn=mvn" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Format check
+        if: ${{ inputs.format_check_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.format_check_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+      - name: Test
+        if: ${{ inputs.test_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.test_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+      - name: Build
+        if: ${{ inputs.build_goal != '' }}
+        working-directory: ${{ inputs.app_path }}
+        env:
+          MVN: ${{ steps.resolve_mvn.outputs.mvn }}
+          GOAL: ${{ inputs.build_goal }}
+        run: |
+          # shellcheck disable=SC2086 # GOAL is a space-separated Maven goal/args list; word-splitting is intended
+          "$MVN" -B -ntp $GOAL
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      # No @semantic-release/npm (no package.json needed) and no
+      # @semantic-release/git (the pom version is never rewritten or
+      # committed). --publish-cmd only records the outputs; it is the sole
+      # reason @semantic-release/exec is pulled in, since no other plugin in
+      # this list exposes a hook to write to $GITHUB_OUTPUT. tag-format
+      # defaults to semantic-release's own "v${version}", so it is not
+      # overridden here.
+      - name: Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || github.token }}
+          SR_VERSION: ${{ inputs.semantic_release_version }}
+          SR_EXEC_VERSION: ${{ inputs.semantic_release_exec_version }}
+        run: |
+          echo "released=false" >>"$GITHUB_OUTPUT"
+          packages=(-p "semantic-release@${SR_VERSION}" -p "@semantic-release/exec@${SR_EXEC_VERSION}")
+          plugins=(@semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/github)
+          # shellcheck disable=SC2016 # --publish-cmd is single-quoted on purpose: ${nextRelease.version} is semantic-release's own template substitution, and $GITHUB_OUTPUT is expanded by the shell semantic-release spawns to run this command, not by this script
+          cmd=(
+            npx -y "${packages[@]}"
+            semantic-release
+            --branches main
+            --plugins "${plugins[@]}"
+            --publish-cmd 'echo "released=true" >>"$GITHUB_OUTPUT"; echo "version=${nextRelease.version}" >>"$GITHUB_OUTPUT"'
+            --no-success-comment
+            --no-fail-comment
+          )
+          "${cmd[@]}"
